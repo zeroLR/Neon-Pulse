@@ -2,6 +2,8 @@
 
 <img width="1014" height="200" alt="blog zerolr net_Neon-Pulse_" src="https://github.com/user-attachments/assets/b59f6120-d566-4531-8f6b-44e2f9c6a226" />
 
+ # >>> [ Play !](https://blog.zerolr.net/Neon-Pulse) <<<
+
 **Unleash your inner rhythm in $Neon$ $Pulse$, the cutting-edge, web-based rhythm game where your body is the controller.**
 
 Step in front of your camera and become part of a mesmerizing Cyber-Minimalist world bathed in vivid cyan and magenta lines. Using advanced Edge AI (MediaPipe), $Neon$ $Pulse$ tracks your every move, turning your hands into neon energy blades.
