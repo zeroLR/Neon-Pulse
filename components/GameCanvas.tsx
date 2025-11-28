@@ -25,6 +25,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const flashRef = useRef<HTMLDivElement>(null); // Screen flash overlay
   const poseService = useRef<PoseService | null>(null);
 
   // --- Three.js Refs ---
@@ -36,10 +37,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Object Pools / References
   const blockMeshes = useRef<Map<string, THREE.Group>>(new Map());
   const particleMeshes = useRef<THREE.Group | null>(null);
-  const debrisMeshes = useRef<THREE.Group | null>(null); // New debris group
+  const debrisMeshes = useRef<THREE.Group | null>(null);
+  const shockwaveMeshes = useRef<THREE.Group | null>(null); // New shockwave group
   const leftSaberRef = useRef<THREE.Group | null>(null);
   const rightSaberRef = useRef<THREE.Group | null>(null);
   const trackLinesRef = useRef<THREE.Line[]>([]);
+  
+  // Camera Shake
+  const shakeIntensity = useRef<number>(0);
   
   // Avatar Refs
   const avatarGroupRef = useRef<THREE.Group | null>(null);
@@ -369,6 +374,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const dGroup = new THREE.Group();
     scene.add(dGroup);
     debrisMeshes.current = dGroup;
+    
+    // Shockwave Group
+    const sGroup = new THREE.Group();
+    scene.add(sGroup);
+    shockwaveMeshes.current = sGroup;
 
     // Debug Group
     const debugGroup = new THREE.Group();
@@ -404,12 +414,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     nextSpawnTime.current = performance.now() + 2000;
     setIsPaused(false);
     nextTrackFlash.current = null;
+    shakeIntensity.current = 0;
     
     if (sceneRef.current) {
         blockMeshes.current.forEach(mesh => sceneRef.current?.remove(mesh));
         blockMeshes.current.clear();
         if (particleMeshes.current) particleMeshes.current.clear();
         if (debrisMeshes.current) debrisMeshes.current.clear();
+        if (shockwaveMeshes.current) shockwaveMeshes.current.clear();
     }
 
     startCountdown();
@@ -431,8 +443,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const playSlashSound = (pitchMod = 1.0) => {
     if (isMuted || !audioContext.current || !noiseBuffer.current) return;
     const ctx = audioContext.current;
+    const now = ctx.currentTime;
     
-    // Create nodes
+    // 1. Noise Layer (Whoosh)
     const noise = ctx.createBufferSource();
     noise.buffer = noiseBuffer.current;
     
@@ -442,24 +455,34 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     const gain = ctx.createGain();
     
-    // Connect
     noise.connect(filter);
     filter.connect(gain);
     gain.connect(ctx.destination);
     
-    // Envelopes
-    const now = ctx.currentTime;
-    
-    // Frequency Sweep (Whoosh)
+    // Envelopes for Noise
     filter.frequency.setValueAtTime(800 * pitchMod, now);
     filter.frequency.exponentialRampToValueAtTime(100, now + 0.3);
     
-    // Volume Envelope
-    gain.gain.setValueAtTime(0.5, now);
+    gain.gain.setValueAtTime(0.4, now);
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
     
     noise.start(now);
     noise.stop(now + 0.3);
+
+    // 2. Oscillator Layer (Kick/Impact)
+    const osc = ctx.createOscillator();
+    osc.frequency.setValueAtTime(150 * pitchMod, now);
+    osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.15);
+    
+    const oscGain = ctx.createGain();
+    oscGain.gain.setValueAtTime(0.5, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    
+    osc.connect(oscGain);
+    oscGain.connect(ctx.destination);
+    
+    osc.start(now);
+    osc.stop(now + 0.15);
   };
 
   const playSound = (freq: number, type: 'sine' | 'square' | 'sawtooth' | 'triangle', duration: number) => {
@@ -479,7 +502,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const createExplosion = (pos: THREE.Vector3, color: number) => {
     if (!particleMeshes.current) return;
     
-    const count = 12;
+    // 1. Particles
+    const count = 16;
     const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
     const material = new THREE.MeshBasicMaterial({ color: color });
 
@@ -487,16 +511,48 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.copy(pos);
         
-        // Random velocity spread
         const velocity = new THREE.Vector3(
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 10
+            (Math.random() - 0.5) * 12,
+            (Math.random() - 0.5) * 12,
+            (Math.random() - 0.5) * 12
         );
         
         mesh.userData = { velocity, life: 1.0 };
         particleMeshes.current.add(mesh);
     }
+
+    // 2. Shockwave (Expanding Ring)
+    if (shockwaveMeshes.current) {
+        const ringGeo = new THREE.RingGeometry(0.5, 0.8, 32);
+        // Face the camera approx
+        const ringMat = new THREE.MeshBasicMaterial({ 
+            color: color, 
+            transparent: true, 
+            opacity: 0.8, 
+            side: THREE.DoubleSide 
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.copy(pos);
+        if (cameraRef.current) ring.lookAt(cameraRef.current.position);
+        
+        ring.userData = { life: 0.5, maxScale: 4.0 };
+        shockwaveMeshes.current.add(ring);
+    }
+  };
+
+  const triggerImpact = (color: number) => {
+      // 1. Screen Flash
+      if (flashRef.current) {
+          const hex = '#' + new THREE.Color(color).getHexString();
+          flashRef.current.style.backgroundColor = hex;
+          flashRef.current.style.opacity = '0.3';
+          setTimeout(() => {
+              if (flashRef.current) flashRef.current.style.opacity = '0';
+          }, 80);
+      }
+      
+      // 2. Camera Shake
+      shakeIntensity.current = 0.4;
   };
 
   const createDebris = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
@@ -735,6 +791,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const dt = Math.min((time - lastTime.current) / 1000, 0.1); 
     lastTime.current = time;
 
+    // --- Camera Shake & Impact Effects ---
+    if (shakeIntensity.current > 0 && cameraRef.current) {
+        const amount = shakeIntensity.current;
+        const rx = (Math.random() - 0.5) * amount;
+        const ry = (Math.random() - 0.5) * amount;
+        cameraRef.current.position.set(rx, 2 + ry, GAME_CONFIG.CAMERA_Z);
+        
+        shakeIntensity.current *= 0.9; // Decay
+        if (shakeIntensity.current < 0.01) {
+            shakeIntensity.current = 0;
+            cameraRef.current.position.set(0, 2, GAME_CONFIG.CAMERA_Z); // Reset
+        }
+    }
+
     // --- MediaPipe Processing ---
     let currentLeftPos = new THREE.Vector3();
     let currentRightPos = new THREE.Vector3();
@@ -877,27 +947,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     const isLeftMatch = hitBy === 'left' && (block.type === 'left' || isWhite);
                     const isRightMatch = hitBy === 'right' && (block.type === 'right' || isWhite);
                     
+                    let debrisColor = GAME_CONFIG.COLORS.WHITE;
+                    if (block.type === 'left') debrisColor = GAME_CONFIG.COLORS.CYAN;
+                    if (block.type === 'right') debrisColor = GAME_CONFIG.COLORS.MAGENTA;
+
                     if (isLeftMatch || isRightMatch) {
                         // Good Hit
                         stats.current.score += 100 + (stats.current.combo * 10);
                         stats.current.combo++;
                         stats.current.maxCombo = Math.max(stats.current.maxCombo, stats.current.combo);
                         stats.current.health = Math.min(100, stats.current.health + GAME_CONFIG.HEAL_PER_HIT);
-                        playSlashSound(isLeftMatch ? 1.0 : 1.2); // New Slash Sound
+                        playSlashSound(isLeftMatch ? 1.0 : 1.2); 
+                        triggerImpact(debrisColor);
                     } else {
                         // Bad Color Hit
                         stats.current.combo = 0; // Combo Breaker
                         playSound(100, 'square', 0.1);
                     }
                     
-                    // Create Debris Effect
-                    let debrisColor = GAME_CONFIG.COLORS.WHITE;
-                    if (block.type === 'left') debrisColor = GAME_CONFIG.COLORS.CYAN;
-                    if (block.type === 'right') debrisColor = GAME_CONFIG.COLORS.MAGENTA;
-                    
                     const saberVel = hitBy === 'left' ? leftVelVector.current : rightVelVector.current;
                     createDebris(blockCenter, debrisColor, saberVel);
-                    createExplosion(blockCenter, debrisColor); // Keep sparks too
+                    createExplosion(blockCenter, debrisColor);
 
                     if (mesh) {
                         sceneRef.current?.remove(mesh);
@@ -928,6 +998,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             p.scale.setScalar(u.life);
             
             if (u.life <= 0) particleMeshes.current.remove(p);
+        }
+    }
+
+    // --- Update Shockwaves ---
+    if (shockwaveMeshes.current && !isPaused) {
+        for (let i = shockwaveMeshes.current.children.length - 1; i >= 0; i--) {
+            const s = shockwaveMeshes.current.children[i] as THREE.Mesh;
+            const u = s.userData as { life: number, maxScale: number };
+            const mat = s.material as THREE.MeshBasicMaterial;
+
+            // Expand
+            const scaleSpeed = u.maxScale * dt * 3;
+            s.scale.addScalar(scaleSpeed);
+            
+            // Fade
+            u.life -= dt * 3;
+            mat.opacity = u.life;
+            
+            if (u.life <= 0) shockwaveMeshes.current.remove(s);
         }
     }
 
@@ -1064,6 +1153,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       {/* Video is hidden (opacity-0) but still active for processing */}
       <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none" playsInline muted />
       <div ref={containerRef} className="absolute inset-0 z-10" />
+      
+      {/* Screen Flash Overlay */}
+      <div ref={flashRef} className="absolute inset-0 z-30 pointer-events-none opacity-0 transition-opacity duration-75 ease-out mix-blend-add"></div>
 
       {/* Debug Menu */}
       <DebugMenu 
@@ -1089,7 +1181,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       {/* Countdown Overlay */}
       {countdown !== null && (
         <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/20">
-            <span className="text-[10rem] font-black text-white animate-ping drop-shadow-[0_0_20px_#00f3ff]">
+            <span className="text-[10px] sm:text-[10rem] font-black text-white animate-ping drop-shadow-[0_0_20px_#00f3ff]">
                 {countdown}
             </span>
         </div>
