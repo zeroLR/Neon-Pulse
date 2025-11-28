@@ -1,0 +1,7 @@
+{
+  "name": "Neon Pulse - TPS",
+  "description": "A Cyber-Minimalist rhythm game powered by AI motion tracking. Slash incoming neon blocks to the beat using your webcam.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
