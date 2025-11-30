@@ -19,9 +19,8 @@ Step in front of your camera and become part of a mesmerizing Cyber-Minimalist w
 
 ## Road Map
 
-- [ ] Optimize feeling of impact
+- [ ] Optimize game experience
 - [ ] Support more VFX
-- [ ] Support more level
 - [ ] Support more backgound
-- [ ] Support customize level
-- [ ] Support playing with music
+- [ ] Support customize beatmap
+- [ ] Support customize music
