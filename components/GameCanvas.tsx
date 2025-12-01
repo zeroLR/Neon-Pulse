@@ -16,6 +16,8 @@ interface GameCanvasProps {
   onRecalibrateRequest: () => void;
 }
 
+const TRAIL_LENGTH = 20;
+
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
     onGameOver, 
     gameStatus, 
@@ -38,11 +40,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const blockMeshes = useRef<Map<string, THREE.Group>>(new Map());
   const particleMeshes = useRef<THREE.Group | null>(null);
   const debrisMeshes = useRef<THREE.Group | null>(null);
-  const shockwaveMeshes = useRef<THREE.Group | null>(null); // New shockwave group
+  const shockwaveMeshes = useRef<THREE.Group | null>(null); 
   const leftSaberRef = useRef<THREE.Group | null>(null);
   const rightSaberRef = useRef<THREE.Group | null>(null);
   const trackLinesRef = useRef<THREE.Line[]>([]);
   
+  // Trails
+  const leftTrailRef = useRef<THREE.Mesh | null>(null);
+  const rightTrailRef = useRef<THREE.Mesh | null>(null);
+  const leftTrailHistory = useRef<{base: THREE.Vector3, tip: THREE.Vector3}[]>([]);
+  const rightTrailHistory = useRef<{base: THREE.Vector3, tip: THREE.Vector3}[]>([]);
+
   // Camera Shake
   const shakeIntensity = useRef<number>(0);
   
@@ -144,7 +152,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     group.add(core);
 
     // 3. Approach Ring (Rhythm Ring)
-    // Scale ring relative to block size
     const ringGeo = new THREE.RingGeometry(size * 0.55, size * 0.65, 32); 
     const ringMat = new THREE.MeshBasicMaterial({ 
         color: color, 
@@ -158,7 +165,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     group.add(ring);
 
     // 4. Collision Hitbox (Invisible/Debug)
-    const hbSize = GAME_CONFIG.BLOCK_HITBOX_SIZE;
+    // Multiplier 1.1x as requested
+    const hbSize = size * 1.1;
     const hbGeo = new THREE.BoxGeometry(hbSize, hbSize, hbSize);
     const hbMat = new THREE.MeshBasicMaterial({ 
         color: 0x00ff00, 
@@ -215,9 +223,109 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
     hitbox.name = 'hitbox';
     hitbox.visible = false;
+    hitbox.scale.setScalar(1.25); // 1.25x Multiplier as requested
     group.add(hitbox);
 
     return group;
+  };
+
+  const createTrailMesh = (color: number) => {
+    // Triangle strip geometry
+    // 2 vertices per segment position (Base, Tip)
+    const vertexCount = TRAIL_LENGTH * 2;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(vertexCount * 3);
+    const alphas = new Float32Array(vertexCount);
+    
+    // Initialize indices for triangle strip
+    const indices = [];
+    for (let i = 0; i < TRAIL_LENGTH - 1; i++) {
+        const v = i * 2;
+        indices.push(v, v + 1, v + 2);
+        indices.push(v + 2, v + 1, v + 3);
+    }
+    geometry.setIndex(indices);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
+
+    const material = new THREE.ShaderMaterial({
+        uniforms: {
+            color: { value: new THREE.Color(color) }
+        },
+        vertexShader: `
+            attribute float alpha;
+            varying float vAlpha;
+            void main() {
+                vAlpha = alpha;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform vec3 color;
+            varying float vAlpha;
+            void main() {
+                gl_FragColor = vec4(color, vAlpha);
+            }
+        `,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = false;
+    return mesh;
+  };
+
+  const updateTrail = (
+      mesh: THREE.Mesh | null, 
+      history: React.MutableRefObject<{base: THREE.Vector3, tip: THREE.Vector3}[]>,
+      saberGroup: THREE.Group | null
+  ) => {
+      if (!mesh || !saberGroup) return;
+
+      // Calculate current Base and Tip in World Space
+      // Base = Group Position
+      const base = saberGroup.position.clone();
+      
+      // Tip = Group Position + (Forward Vector * Blade Length)
+      // Saber points along +Z locally? createSaberMesh rotates cylinder.
+      const bladeLength = 4.0;
+      const tip = base.clone().add(new THREE.Vector3(0, 0, bladeLength).applyQuaternion(saberGroup.quaternion));
+
+      // Update History
+      history.current.unshift({ base, tip });
+      if (history.current.length > TRAIL_LENGTH) {
+          history.current.pop();
+      }
+
+      // Fill Geometry
+      const positions = mesh.geometry.attributes.position.array as Float32Array;
+      const alphas = mesh.geometry.attributes.alpha.array as Float32Array;
+
+      for (let i = 0; i < TRAIL_LENGTH; i++) {
+          const point = history.current[i] || history.current[history.current.length - 1]; // Fallback to last known
+          if (!point) continue;
+
+          // Vertex 1 (Base)
+          positions[i * 6 + 0] = point.base.x;
+          positions[i * 6 + 1] = point.base.y;
+          positions[i * 6 + 2] = point.base.z;
+
+          // Vertex 2 (Tip)
+          positions[i * 6 + 3] = point.tip.x;
+          positions[i * 6 + 4] = point.tip.y;
+          positions[i * 6 + 5] = point.tip.z;
+
+          // Alpha Fade (Newest = 1, Oldest = 0)
+          const alpha = 1.0 - (i / TRAIL_LENGTH);
+          alphas[i * 2] = alpha * 0.5; // Max opacity 0.5
+          alphas[i * 2 + 1] = alpha * 0.5;
+      }
+
+      mesh.geometry.attributes.position.needsUpdate = true;
+      mesh.geometry.attributes.alpha.needsUpdate = true;
   };
 
   const createAvatarMesh = () => {
@@ -268,7 +376,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
      if (!camera) return new THREE.Vector3(0, 0, 0);
 
      // Z-Scale: Positive means MediaPipe -Z (Front) maps to Game -Z (Into Screen)
-     // This creates an avatar facing AWAY from the camera (TPS view).
      const zScale = 6.0; 
      const zBias = 0; 
      const safeZ = Number.isFinite(rawZ) ? rawZ : 0;
@@ -296,7 +403,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const createTrackLines = (scene: THREE.Scene) => {
       TRACK_LAYOUT.forEach((track, index) => {
-          // Flip X here if needed for consistency, but tracks are environmental.
           const endPos = mapTo3D(track.x, track.y, 0, true);
           const startPos = new THREE.Vector3(0, 0, GAME_CONFIG.SPAWN_Z);
 
@@ -365,6 +471,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     scene.add(rSaber);
     rightSaberRef.current = rSaber;
 
+    // Trails
+    const lTrail = createTrailMesh(GAME_CONFIG.COLORS.CYAN);
+    scene.add(lTrail);
+    leftTrailRef.current = lTrail;
+
+    const rTrail = createTrailMesh(GAME_CONFIG.COLORS.MAGENTA);
+    scene.add(rTrail);
+    rightTrailRef.current = rTrail;
+
     // Particles Group
     const pGroup = new THREE.Group();
     scene.add(pGroup);
@@ -415,6 +530,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
+    
+    // Clear trails on restart
+    leftTrailHistory.current = [];
+    rightTrailHistory.current = [];
     
     if (sceneRef.current) {
         blockMeshes.current.forEach(mesh => sceneRef.current?.remove(mesh));
@@ -524,7 +643,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // 2. Shockwave (Expanding Ring)
     if (shockwaveMeshes.current) {
         const ringGeo = new THREE.RingGeometry(0.5, 0.8, 32);
-        // Face the camera approx
         const ringMat = new THREE.MeshBasicMaterial({ 
             color: color, 
             transparent: true, 
@@ -565,12 +683,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
 
       // Determine Cut Direction perpendicular to saber velocity
-      // Saber moving roughly horizontal -> cut is horizontal, pieces go Up/Down
-      // Saber moving roughly vertical -> cut is vertical, pieces go Left/Right
-      // Simplified: Just split along the vector perpendicular to velocity in the XY plane.
-      
       let separationDir = new THREE.Vector3(-saberVelocity.y, saberVelocity.x, 0).normalize();
-      if (separationDir.lengthSq() < 0.1) separationDir.set(0, 1, 0); // Default vertical separation
+      if (separationDir.lengthSq() < 0.1) separationDir.set(0, 1, 0); 
 
       // Create two halves
       for (let i = -1; i <= 1; i += 2) {
@@ -586,10 +700,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           const angle = Math.atan2(saberVelocity.y, saberVelocity.x);
           group.rotation.z = angle;
 
-          // Velocity: Fling apart + Gravity will happen in update
+          // Velocity: Fling apart
           const force = GAME_CONFIG.DEBRIS_EXPLOSION_FORCE;
           const vel = separationDir.clone().multiplyScalar(i * force);
-          // Add some forward momentum from block and random rotation
           vel.z = GAME_CONFIG.BLOCK_SPEED * 0.5; 
           
           group.userData = { 
@@ -669,7 +782,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const hitbox = saberGroup.getObjectByName('hitbox') as THREE.Mesh;
       if (!hitbox) return false;
 
-      const invMatrix = saberGroup.matrixWorld.clone().invert();
+      // Use hitbox.matrixWorld instead of saberGroup.matrixWorld to account for local scale/offset
+      const invMatrix = hitbox.matrixWorld.clone().invert();
       const localPos = targetPoint.clone().applyMatrix4(invMatrix);
 
       if (!hitbox.geometry.boundingBox) hitbox.geometry.computeBoundingBox();
@@ -679,7 +793,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const checkBlockCollision = (saberGroup: THREE.Group, blockWorldPos: THREE.Vector3) => {
-      const halfSize = (GAME_CONFIG.BLOCK_HITBOX_SIZE * debugConfig.blockScale) / 2;
+      // Use visual size * 1.1 multiplier
+      const halfSize = (GAME_CONFIG.BLOCK_SIZE * debugConfig.blockScale * 1.1) / 2;
+      
       const points = [
           blockWorldPos, 
           new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y + halfSize, blockWorldPos.z + halfSize),
@@ -703,8 +819,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       
       const { head, spine, shoulders, hips, leftArm, rightArm } = avatarParts.current;
       
-      // Mirror x (1 - x) to match player screen side (Right Hand -> Right Side).
-      // Z-scaling is positive in mapTo3D, so "Forward" (negative Z) maps to "Deep" (negative Z).
       const getPos = (idx: number) => mapTo3D(1 - lm[idx].x, lm[idx].y, lm[idx].z);
 
       const nose = getPos(0);
@@ -726,7 +840,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           line.geometry.attributes.position.needsUpdate = true;
       };
 
-      // Midpoints for spine
       const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
       const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
 
@@ -838,6 +951,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
              currentLeftPos = mapTo3D(lw.x, lw.y, lw.z);
              currentRightPos = mapTo3D(rw.x, rw.y, rw.z);
         }
+        
+        // Update Trails
+        updateTrail(leftTrailRef.current, leftTrailHistory, leftSaberRef.current);
+        updateTrail(rightTrailRef.current, rightTrailHistory, rightSaberRef.current);
 
         // Velocity Calculation
         leftVelocity.current = currentLeftPos.distanceTo(prevLeftPos.current) / dt;
