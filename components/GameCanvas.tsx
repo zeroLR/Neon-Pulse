@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { PoseService } from '../services/poseService';
-import { GAME_CONFIG, BEAT_MAP, TRACK_LAYOUT, getTrackType, getTrackIndexByLabel } from '../constants';
+import { GAME_CONFIG, BEAT_MAP, TRACK_LAYOUT, getTrackType, getTrackIndexByLabel, CALIBRATION_CONFIG } from '../constants';
 import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig } from '../types';
 import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
@@ -173,9 +173,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     sceneRef.current = scene;
 
     // Camera
-    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 100);
-    camera.position.set(0, 2, GAME_CONFIG.CAMERA_Z); // Slightly higher camera for TPS
-    camera.lookAt(0, 0, -20);
+    const camera = new THREE.PerspectiveCamera(
+      GAME_CONFIG.CAMERA.FOV, 
+      width / height, 
+      GAME_CONFIG.CAMERA.NEAR, 
+      GAME_CONFIG.CAMERA.FAR
+    );
+    camera.position.set(0, GAME_CONFIG.CAMERA.POSITION_Y, GAME_CONFIG.CAMERA_Z);
+    camera.lookAt(0, 0, GAME_CONFIG.CAMERA.LOOK_AT_Z);
     cameraRef.current = camera;
 
     // Renderer
@@ -186,16 +191,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     rendererRef.current = renderer;
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, GAME_CONFIG.LIGHTS.AMBIENT_INTENSITY);
     scene.add(ambientLight);
-    const pointLight = new THREE.PointLight(0xffffff, 1, 100);
-    pointLight.position.set(0, 10, 10);
+    const pointLight = new THREE.PointLight(
+      0xffffff, 
+      GAME_CONFIG.LIGHTS.POINT_INTENSITY, 
+      GAME_CONFIG.LIGHTS.POINT_DISTANCE
+    );
+    pointLight.position.set(
+      GAME_CONFIG.LIGHTS.POINT_POSITION.x, 
+      GAME_CONFIG.LIGHTS.POINT_POSITION.y, 
+      GAME_CONFIG.LIGHTS.POINT_POSITION.z
+    );
     scene.add(pointLight);
 
     // Grid (Floor) - Raised for TPS
-    const gridHelper = new THREE.GridHelper(60, 60, 0x111111, 0x000000);
-    gridHelper.position.y = -6;
-    gridHelper.position.z = -20;
+    const gridHelper = new THREE.GridHelper(
+      GAME_CONFIG.GRID.SIZE, 
+      GAME_CONFIG.GRID.DIVISIONS, 
+      GAME_CONFIG.GRID.COLOR_CENTER, 
+      GAME_CONFIG.GRID.COLOR_GRID
+    );
+    gridHelper.position.y = GAME_CONFIG.GRID.POSITION_Y;
+    gridHelper.position.z = GAME_CONFIG.GRID.POSITION_Z;
     scene.add(gridHelper);
 
     // Avatar
@@ -254,7 +272,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     blocks.current = [];
     gameState.resetStats();
     lastTime.current = performance.now();
-    nextSpawnTime.current = performance.now() + 2000;
+    nextSpawnTime.current = performance.now() + GAME_CONFIG.INITIAL_SPAWN_DELAY;
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
@@ -312,14 +330,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       if (flashRef.current) {
           const hex = '#' + new THREE.Color(color).getHexString();
           flashRef.current.style.backgroundColor = hex;
-          flashRef.current.style.opacity = '0.3';
+          flashRef.current.style.opacity = String(GAME_CONFIG.SCREEN_FLASH.OPACITY);
           setTimeout(() => {
               if (flashRef.current) flashRef.current.style.opacity = '0';
-          }, 80);
+          }, GAME_CONFIG.SCREEN_FLASH.DURATION);
       }
       
       // 2. Camera Shake
-      shakeIntensity.current = 0.4;
+      shakeIntensity.current = GAME_CONFIG.CAMERA_SHAKE.INITIAL_INTENSITY;
   };
 
   const updateDebugVisuals = (
@@ -397,9 +415,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const target3D = mapTo3D(target.x, target.y, 0, true);
     
     // Calculate 3D Start (at SPAWN_Z)
-    const spreadFactor = 1.3;
-    const startX = target3D.x * spreadFactor;
-    const startY = target3D.y * spreadFactor;
+    const startX = target3D.x * GAME_CONFIG.SPAWN.SPREAD_FACTOR;
+    const startY = target3D.y * GAME_CONFIG.SPAWN.SPREAD_FACTOR;
     const startPos = new THREE.Vector3(startX, startY, GAME_CONFIG.SPAWN_Z);
 
     mesh.position.copy(startPos);
@@ -470,7 +487,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Flash the spawned tracks
     if (spawnedTracks.length > 0) {
       nextTrackFlash.current = spawnedTracks;
-      setTimeout(() => { nextTrackFlash.current = null; }, 500);
+      setTimeout(() => { nextTrackFlash.current = null; }, GAME_CONFIG.SPAWN.TRACK_FLASH_DURATION);
     }
   };
 
@@ -496,12 +513,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const amount = shakeIntensity.current;
         const rx = (Math.random() - 0.5) * amount;
         const ry = (Math.random() - 0.5) * amount;
-        cameraRef.current.position.set(rx, 2 + ry, GAME_CONFIG.CAMERA_Z);
+        cameraRef.current.position.set(rx, GAME_CONFIG.CAMERA.POSITION_Y + ry, GAME_CONFIG.CAMERA_Z);
         
-        shakeIntensity.current *= 0.9; // Decay
-        if (shakeIntensity.current < 0.01) {
+        shakeIntensity.current *= GAME_CONFIG.CAMERA_SHAKE.DECAY_RATE;
+        if (shakeIntensity.current < GAME_CONFIG.CAMERA_SHAKE.THRESHOLD) {
             shakeIntensity.current = 0;
-            cameraRef.current.position.set(0, 2, GAME_CONFIG.CAMERA_Z); // Reset
+            cameraRef.current.position.set(0, GAME_CONFIG.CAMERA.POSITION_Y, GAME_CONFIG.CAMERA_Z);
         }
     }
 
@@ -605,7 +622,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 mesh.position.set(block.position.x, block.position.y, block.position.z);
                 
                 // Visual Cues: Filling Wireframe
-                const hitStartZ = GAME_CONFIG.HIT_Z - 3.5; 
+                const hitStartZ = GAME_CONFIG.HIT_Z + GAME_CONFIG.HIT_ZONE.FILL_START_OFFSET; 
                 const spawnZ = GAME_CONFIG.SPAWN_Z; 
                 
                 let fillProgress = (block.position.z - spawnZ) / (hitStartZ - spawnZ);
@@ -640,7 +657,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
 
             // Hit Logic - Extended Z range for better hit detection
-            if (block.position.z > -5 && block.position.z < 5 && !block.hit) { 
+            if (block.position.z > GAME_CONFIG.HIT_ZONE.MIN_Z && block.position.z < GAME_CONFIG.HIT_ZONE.MAX_Z && !block.hit) { 
                 let hitBy: 'left' | 'right' | null = null;
                 const blockCenter = new THREE.Vector3(block.position.x, block.position.y, block.position.z);
                 
@@ -924,8 +941,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               <div className="relative">
                   <canvas 
                       ref={cameraPreview.cameraPreviewRef}
-                      width={240}
-                      height={180}
+                      width={GAME_CONFIG.CAMERA_PREVIEW.WIDTH}
+                      height={GAME_CONFIG.CAMERA_PREVIEW.HEIGHT}
                       className="block"
                   />
                   <div className="absolute top-1 left-1 px-2 py-0.5 bg-black/70 rounded text-[10px] font-mono text-gray-400 uppercase">

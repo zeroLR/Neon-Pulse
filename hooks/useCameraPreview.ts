@@ -1,5 +1,9 @@
 import React, { useRef, useCallback, useEffect, RefObject, MutableRefObject } from 'react';
 import { NormalizedLandmark } from '../types';
+import { GAME_CONFIG } from '../constants';
+
+// Convert hex color to CSS string
+const hexToCSS = (hex: number): string => '#' + hex.toString(16).padStart(6, '0');
 
 export interface CameraPreviewAPI {
   cameraPreviewRef: RefObject<HTMLCanvasElement>;
@@ -20,6 +24,9 @@ export const useCameraPreview = (
       const canvas = cameraPreviewRef.current;
       const ctx = canvas.getContext('2d');
       const video = videoRef.current;
+      
+      const cyanColor = hexToCSS(GAME_CONFIG.COLORS.CYAN);
+      const magentaColor = hexToCSS(GAME_CONFIG.COLORS.MAGENTA);
       
       if (ctx && video.readyState >= 2) {
         // Draw video frame (mirrored)
@@ -68,14 +75,14 @@ export const useCameraPreview = (
           };
           
           // Draw wrist to palm lines (saber direction)
-          drawLine(leftWrist, leftPalm, '#00f3ff');
-          drawLine(rightWrist, rightPalm, '#ff00ff');
+          drawLine(leftWrist, leftPalm, cyanColor);
+          drawLine(rightWrist, rightPalm, magentaColor);
           
           // Draw points - wrists smaller, palms larger
-          drawPoint(leftWrist, '#00f3ff', 6);
-          drawPoint(rightWrist, '#ff00ff', 6);
-          drawPoint(leftPalm, '#00f3ff', 10);
-          drawPoint(rightPalm, '#ff00ff', 10);
+          drawPoint(leftWrist, cyanColor, 6);
+          drawPoint(rightWrist, magentaColor, 6);
+          drawPoint(leftPalm, cyanColor, 10);
+          drawPoint(rightPalm, magentaColor, 10);
         }
       }
     }

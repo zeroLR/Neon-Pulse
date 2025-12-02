@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { NormalizedLandmark } from '../types';
+import { CALIBRATION_CONFIG } from '../constants';
 
 export interface CalibrationAPI {
   calibrationLeft: number;
@@ -37,7 +38,7 @@ export const useCalibration = (
         setCalibrationRight(0);
         setCalibrationComplete(false);
         onCalibrationComplete();
-      }, 1500);
+      }, CALIBRATION_CONFIG.COMPLETION_DELAY);
     }
   }, [calibrationLeft, calibrationRight, calibrationComplete, onCalibrationComplete]);
 
@@ -46,20 +47,20 @@ export const useCalibration = (
     const rw = landmarks[16];
 
     // Mirroring Logic for Calibration
-    const tolerance = 0.15;
-    const isLeftInZone = Math.abs(lw.x - 0.8) < tolerance && Math.abs(lw.y - 0.5) < tolerance;
-    const isRightInZone = Math.abs(rw.x - 0.2) < tolerance && Math.abs(rw.y - 0.5) < tolerance;
+    const { TOLERANCE, LEFT_ZONE, RIGHT_ZONE, PROGRESS_RATE, DECAY_RATE } = CALIBRATION_CONFIG;
+    const isLeftInZone = Math.abs(lw.x - LEFT_ZONE.x) < TOLERANCE && Math.abs(lw.y - LEFT_ZONE.y) < TOLERANCE;
+    const isRightInZone = Math.abs(rw.x - RIGHT_ZONE.x) < TOLERANCE && Math.abs(rw.y - RIGHT_ZONE.y) < TOLERANCE;
 
     setCalibrationLeft(prev => 
       isLeftInZone 
-        ? Math.min(100, prev + dt * 100) 
-        : Math.max(0, prev - dt * 200)
+        ? Math.min(100, prev + dt * PROGRESS_RATE) 
+        : Math.max(0, prev - dt * DECAY_RATE)
     );
 
     setCalibrationRight(prev => 
       isRightInZone 
-        ? Math.min(100, prev + dt * 100) 
-        : Math.max(0, prev - dt * 200)
+        ? Math.min(100, prev + dt * PROGRESS_RATE) 
+        : Math.max(0, prev - dt * DECAY_RATE)
     );
   }, []);
 
