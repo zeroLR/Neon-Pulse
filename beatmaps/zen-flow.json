@@ -1,0 +1,24 @@
+{
+  "id": "zen-flow",
+  "title": "Zen Flow",
+  "artist": "Digital Meditation",
+  "bpm": 90,
+  "difficulty": "easy",
+  "difficultyRating": 2,
+  "data": [
+    [{ "track": "L2", "direction": "down" }, null, null, null],
+    [null, null, { "track": "R2", "direction": "down" }, null],
+    [{ "track": "L3", "direction": "up" }, null, null, null],
+    [null, null, { "track": "R3", "direction": "up" }, null],
+    
+    [{ "track": "T1", "direction": "down" }, null, { "track": "T2", "direction": "down" }, null],
+    [null, null, null, null],
+    [{ "track": "B1", "direction": "up" }, null, { "track": "B2", "direction": "up" }, null],
+    [null, null, null, null],
+    
+    [{ "track": "L1", "direction": "down-right" }, null, null, null],
+    [null, { "track": "R1", "direction": "down-left" }, null, null],
+    [null, null, { "track": "L4", "direction": "up-right" }, null],
+    [null, null, null, { "track": "R4", "direction": "up-left" }]
+  ]
+}

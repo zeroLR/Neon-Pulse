@@ -9,3 +9,5 @@ export type { CameraPreviewAPI } from './useCameraPreview';
 
 export { useCalibration } from './useCalibration';
 export type { CalibrationAPI } from './useCalibration';
+
+export { useBeatmaps } from './useBeatmaps';

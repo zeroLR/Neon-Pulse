@@ -1,0 +1,166 @@
+{
+  "id": "faded",
+  "title": "Faded",
+  "artist": "Alan Walker",
+  "bpm": 90,
+  "difficulty": "normal",
+  "difficultyRating": 5,
+  "youtubeId": "60ItHLz5WEA",
+  "data": [
+    [null, null, null, null],
+    [{ "track": "L2", "direction": "down" }, null, null, null],
+    [null, null, null, null],
+    [null, null, { "track": "R2", "direction": "down" }, null],
+    
+    [{ "track": "L2", "direction": "down" }, null, { "track": "R2", "direction": "down" }, null],
+    [null, null, null, null],
+    [{ "track": "L3", "direction": "down" }, null, { "track": "R3", "direction": "down" }, null],
+    [null, null, null, null],
+    
+    [{ "track": "T1", "direction": "down" }, null, null, null],
+    [null, null, { "track": "T2", "direction": "down" }, null],
+    [{ "track": "L2", "direction": "right" }, null, { "track": "R2", "direction": "left" }, null],
+    [null, null, null, null],
+    
+    [{ "track": "L2", "direction": "down" }, null, { "track": "R2", "direction": "down" }, null],
+    [{ "track": "L3", "direction": "down" }, null, { "track": "R3", "direction": "down" }, null],
+    [
+      { "track": "L2", "direction": "down" },
+      { "track": "R2", "direction": "down" },
+      { "track": "L3", "direction": "down" },
+      { "track": "R3", "direction": "down" }
+    ],
+    [
+      [{ "track": "L2", "direction": "down" }, { "track": "R2", "direction": "down" }],
+      null,
+      [{ "track": "L3", "direction": "down" }, { "track": "R3", "direction": "down" }],
+      null
+    ],
+    
+    [
+      [{ "track": "L2", "direction": "right" }, { "track": "R2", "direction": "left" }],
+      { "track": "T1", "direction": "down" },
+      [{ "track": "L3", "direction": "right" }, { "track": "R3", "direction": "left" }],
+      { "track": "T2", "direction": "down" }
+    ],
+    [
+      { "track": "L1", "direction": "down" },
+      { "track": "R1", "direction": "down" },
+      { "track": "L2", "direction": "down" },
+      { "track": "R2", "direction": "down" }
+    ],
+    [
+      [{ "track": "B1", "direction": "up" }, { "track": "B2", "direction": "up" }],
+      null,
+      [{ "track": "T1", "direction": "down" }, { "track": "T2", "direction": "down" }],
+      null
+    ],
+    [
+      { "track": "L3", "direction": "right" },
+      { "track": "R3", "direction": "left" },
+      { "track": "L2", "direction": "right" },
+      { "track": "R2", "direction": "left" }
+    ],
+    
+    [
+      { "track": "L1", "direction": "down-right" },
+      { "track": "R1", "direction": "down-left" },
+      { "track": "L4", "direction": "up-right" },
+      { "track": "R4", "direction": "up-left" }
+    ],
+    [
+      [{ "track": "L2", "direction": "down" }, { "track": "R2", "direction": "down" }],
+      [{ "track": "L3", "direction": "down" }, { "track": "R3", "direction": "down" }],
+      [{ "track": "L2", "direction": "down" }, { "track": "R2", "direction": "down" }],
+      [{ "track": "L3", "direction": "down" }, { "track": "R3", "direction": "down" }]
+    ],
+    [
+      { "track": "T1", "direction": "down" },
+      { "track": "T2", "direction": "down" },
+      { "track": "B1", "direction": "up" },
+      { "track": "B2", "direction": "up" }
+    ],
+    [
+      [{ "track": "L1", "direction": "right" }, { "track": "R1", "direction": "left" }],
+      null,
+      [{ "track": "L4", "direction": "right" }, { "track": "R4", "direction": "left" }],
+      null
+    ],
+    
+    [{ "track": "L2", "direction": "any" }, null, null, null],
+    [null, null, { "track": "R2", "direction": "any" }, null],
+    [{ "track": "L3", "direction": "any" }, null, { "track": "R3", "direction": "any" }, null],
+    [null, null, null, null],
+    
+    [{ "track": "L2", "direction": "down" }, { "track": "R2", "direction": "down" }, null, null],
+    [
+      { "track": "L2", "direction": "down" },
+      { "track": "R2", "direction": "down" },
+      { "track": "L3", "direction": "down" },
+      { "track": "R3", "direction": "down" }
+    ],
+    [
+      { "track": "L1", "direction": "down" },
+      { "track": "R1", "direction": "down" },
+      { "track": "L2", "direction": "down" },
+      { "track": "R2", "direction": "down" }
+    ],
+    [
+      [{ "track": "L1", "direction": "down" }, { "track": "R1", "direction": "down" }],
+      [{ "track": "L2", "direction": "down" }, { "track": "R2", "direction": "down" }],
+      [{ "track": "L3", "direction": "down" }, { "track": "R3", "direction": "down" }],
+      [{ "track": "L4", "direction": "down" }, { "track": "R4", "direction": "down" }]
+    ],
+    
+    [
+      [{ "track": "L1", "direction": "down-right" }, { "track": "R1", "direction": "down-left" }],
+      [{ "track": "T1", "direction": "down" }, { "track": "T2", "direction": "down" }],
+      [{ "track": "L4", "direction": "up-right" }, { "track": "R4", "direction": "up-left" }],
+      [{ "track": "B1", "direction": "up" }, { "track": "B2", "direction": "up" }]
+    ],
+    [
+      { "track": "L1", "direction": "down" },
+      { "track": "L2", "direction": "down" },
+      { "track": "L3", "direction": "down" },
+      { "track": "L4", "direction": "down" }
+    ],
+    [
+      { "track": "R1", "direction": "down" },
+      { "track": "R2", "direction": "down" },
+      { "track": "R3", "direction": "down" },
+      { "track": "R4", "direction": "down" }
+    ],
+    [
+      [{ "track": "L2", "direction": "right" }, { "track": "R2", "direction": "left" }],
+      [{ "track": "L3", "direction": "right" }, { "track": "R3", "direction": "left" }],
+      [{ "track": "L2", "direction": "right" }, { "track": "R2", "direction": "left" }],
+      [{ "track": "L3", "direction": "right" }, { "track": "R3", "direction": "left" }]
+    ],
+    
+    [
+      [{ "track": "T1", "direction": "down" }, { "track": "T2", "direction": "down" }],
+      { "track": "L2", "direction": "right" },
+      [{ "track": "B1", "direction": "up" }, { "track": "B2", "direction": "up" }],
+      { "track": "R2", "direction": "left" }
+    ],
+    [
+      { "track": "L1", "direction": "down-right" },
+      { "track": "R4", "direction": "up-left" },
+      { "track": "R1", "direction": "down-left" },
+      { "track": "L4", "direction": "up-right" }
+    ],
+    [
+      [{ "track": "L2", "direction": "down" }, { "track": "R2", "direction": "down" }],
+      [{ "track": "T1", "direction": "down" }, { "track": "T2", "direction": "down" }],
+      [{ "track": "L3", "direction": "down" }, { "track": "R3", "direction": "down" }],
+      [{ "track": "B1", "direction": "up" }, { "track": "B2", "direction": "up" }]
+    ],
+    
+    [
+      [{ "track": "L1", "direction": "down" }, { "track": "R1", "direction": "down" }, { "track": "T1", "direction": "down" }, { "track": "T2", "direction": "down" }],
+      null,
+      null,
+      null
+    ]
+  ]
+}
