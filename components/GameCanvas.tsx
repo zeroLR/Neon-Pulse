@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { PoseService } from '../services/poseService';
-import { GAME_CONFIG, BEAT_PATTERNS, TRACK_LAYOUT } from '../constants';
+import { GAME_CONFIG, BEAT_MAP, TRACK_LAYOUT, getTrackType, getTrackIndexByLabel } from '../constants';
 import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig } from '../types';
 import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
@@ -69,14 +69,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const debugGroupRef = useRef<THREE.Group | null>(null);
 
   // --- Game State ---
-  const blocks = useRef<Block[]>([]);
+  const blocks = useRef<any[]>([]); // Using any to allow adding startPos dynamically
   const stats = useRef<GameStats>({ score: 0, combo: 0, maxCombo: 0, health: 100 });
   const lastTime = useRef<number>(0);
   const nextSpawnTime = useRef<number>(0);
   const [isPaused, setIsPaused] = useState(false);
   
+  // Beatmap tracking
+  const currentMeasure = useRef<number>(0);
+  const currentBeat = useRef<number>(0);
+  
   // Use Ref for visual-only state to avoid re-renders resetting the game loop
-  const nextTrackFlash = useRef<number | null>(null);
+  const nextTrackFlash = useRef<number[] | null>(null);
   
   // Countdown State
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -89,11 +93,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       showNodes: false,
       showHitboxes: false,
       showBlockHitboxes: false,
-      saberScale: 1.0,
+      saberScale: GAME_CONFIG.DEFAULT_SABER_SCALE,
       blockScale: 1.0,
-      showAvatar: false
+      showAvatar: false,
+      showTrail: GAME_CONFIG.DEFAULT_SHOW_TRAIL,
+      showCameraPreview: GAME_CONFIG.DEFAULT_SHOW_CAMERA_PREVIEW
   });
   const [isDebugOpen, setIsDebugOpen] = useState(false);
+  
+  // Camera preview canvas ref
+  const cameraPreviewRef = useRef<HTMLCanvasElement>(null);
 
   // Calibration State
   const [calibrationLeft, setCalibrationLeft] = useState(0);
@@ -129,15 +138,33 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const geometry = new THREE.BoxGeometry(size, size, size);
     const edges = new THREE.EdgesGeometry(geometry);
     
+    // Add lineDistance attribute for dashed material to work on EdgesGeometry segments
+    const lineDistances = new Float32Array(edges.attributes.position.count);
+    for (let i = 0; i < lineDistances.length; i += 2) {
+        lineDistances[i] = 0;
+        lineDistances[i + 1] = size;
+    }
+    edges.setAttribute('lineDistance', new THREE.BufferAttribute(lineDistances, 1));
+
     // Color
     let color = GAME_CONFIG.COLORS.WHITE;
     if (type === 'left') color = GAME_CONFIG.COLORS.CYAN;
     if (type === 'right') color = GAME_CONFIG.COLORS.MAGENTA;
 
-    // 1. Wireframe (The Neon Outline)
-    const lineMaterial = new THREE.LineBasicMaterial({ color: color, linewidth: 2, transparent: true, opacity: 0.5 });
+    // 1. Wireframe (The Neon Outline - White, filling effect)
+    const lineMaterial = new THREE.LineDashedMaterial({ 
+        color: 0xffffff, // White
+        linewidth: 3, // Increased visibility
+        transparent: true, 
+        opacity: 1.0, // Start fully opaque (but dashSize=0 makes it invisible initially)
+        dashSize: 0, // Starts empty
+        gapSize: size, // Full gap
+        scale: 1.5 
+    });
     const wireframe = new THREE.LineSegments(edges, lineMaterial);
     wireframe.name = 'wireframe';
+    // Slightly scale up wireframe to prevent Z-fighting and add "thickness" feel
+    wireframe.scale.setScalar(1.01); 
     group.add(wireframe);
 
     // 2. Inner Glow
@@ -150,19 +177,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const core = new THREE.Mesh(geometry, innerMaterial);
     core.name = 'core';
     group.add(core);
-
-    // 3. Approach Ring (Rhythm Ring)
-    const ringGeo = new THREE.RingGeometry(size * 0.55, size * 0.65, 32); 
-    const ringMat = new THREE.MeshBasicMaterial({ 
-        color: color, 
-        transparent: true, 
-        opacity: 0.8, 
-        side: THREE.DoubleSide 
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.name = 'ring';
-    ring.position.z = size * 0.51; 
-    group.add(ring);
 
     // 4. Collision Hitbox (Invisible/Debug)
     // Multiplier 1.1x as requested
@@ -214,14 +228,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     // Hitbox (Physical Collider)
     const { WIDTH, HEIGHT, LENGTH, OFFSET_Z } = GAME_CONFIG.SABER_HITBOX_CONFIG;
+    // Create Box centered at origin
     const hitboxGeo = new THREE.BoxGeometry(WIDTH, HEIGHT, LENGTH);
-    hitboxGeo.translate(0, 0, OFFSET_Z); 
+    
     const hitboxMat = new THREE.MeshBasicMaterial({ 
         color: color, 
         wireframe: true,
     });
     const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
     hitbox.name = 'hitbox';
+    // Offset using position instead of geometry translate for better matrix handling
+    hitbox.position.set(0, 0, OFFSET_Z);
     hitbox.visible = false;
     hitbox.scale.setScalar(1.25); // 1.25x Multiplier as requested
     group.add(hitbox);
@@ -281,7 +298,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const updateTrail = (
       mesh: THREE.Mesh | null, 
       history: React.MutableRefObject<{base: THREE.Vector3, tip: THREE.Vector3}[]>,
-      saberGroup: THREE.Group | null
+      saberGroup: THREE.Group | null,
+      saberScale: number
   ) => {
       if (!mesh || !saberGroup) return;
 
@@ -289,9 +307,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       // Base = Group Position
       const base = saberGroup.position.clone();
       
-      // Tip = Group Position + (Forward Vector * Blade Length)
+      // Tip = Group Position + (Forward Vector * Blade Length * Scale)
       // Saber points along +Z locally? createSaberMesh rotates cylinder.
-      const bladeLength = 4.0;
+      const bladeLength = 4.0 * saberScale;
       const tip = base.clone().add(new THREE.Vector3(0, 0, bladeLength).applyQuaternion(saberGroup.quaternion));
 
       // Update History
@@ -402,15 +420,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const createTrackLines = (scene: THREE.Scene) => {
-      TRACK_LAYOUT.forEach((track, index) => {
-          const endPos = mapTo3D(track.x, track.y, 0, true);
-          const startPos = new THREE.Vector3(0, 0, GAME_CONFIG.SPAWN_Z);
+      // Clear existing lines
+      trackLinesRef.current.forEach(line => scene.remove(line));
+      trackLinesRef.current = [];
 
-          const geometry = new THREE.BufferGeometry().setFromPoints([startPos, endPos]);
+      TRACK_LAYOUT.forEach((track, index) => {
+          const target3D = mapTo3D(track.x, track.y, 0, true);
+          // Start position logic matching spawnBlock (spreadFactor 1.3 at SPAWN_Z)
+          const spreadFactor = 1.3;
+          // Calculate height/width at SPAWN_Z
+          // Approximate by scaling based on target
+          const startX = target3D.x * spreadFactor;
+          const startY = target3D.y * spreadFactor;
+          const startPos = new THREE.Vector3(startX, startY, GAME_CONFIG.SPAWN_Z);
+
+          const geometry = new THREE.BufferGeometry().setFromPoints([startPos, target3D]);
           const material = new THREE.LineBasicMaterial({ 
               color: GAME_CONFIG.COLORS.GRAY, 
               transparent: true, 
-              opacity: 0.2 
+              opacity: 0.1, // Softer rails
+              linewidth: 1
           });
           const line = new THREE.Line(geometry, material);
           scene.add(line);
@@ -530,6 +559,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
+    
+    // Reset beatmap position
+    currentMeasure.current = 0;
+    currentBeat.current = 0;
     
     // Clear trails on restart
     leftTrailHistory.current = [];
@@ -778,40 +811,112 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       }
   };
 
-  const checkSaberCollision = (saberGroup: THREE.Group, targetPoint: THREE.Vector3) => {
-      const hitbox = saberGroup.getObjectByName('hitbox') as THREE.Mesh;
-      if (!hitbox) return false;
+  // Store previous frame's saber blade points for sweep detection
+  const prevLeftBladePoints = useRef<THREE.Vector3[]>([]);
+  const prevRightBladePoints = useRef<THREE.Vector3[]>([]);
 
-      // Use hitbox.matrixWorld instead of saberGroup.matrixWorld to account for local scale/offset
-      const invMatrix = hitbox.matrixWorld.clone().invert();
-      const localPos = targetPoint.clone().applyMatrix4(invMatrix);
-
-      if (!hitbox.geometry.boundingBox) hitbox.geometry.computeBoundingBox();
-      const bounds = hitbox.geometry.boundingBox!;
+  const getSaberBladePoints = (saberGroup: THREE.Group, saberScale: number = 1.0): THREE.Vector3[] => {
+      saberGroup.updateMatrixWorld(true);
+      const points: THREE.Vector3[] = [];
+      const startZ = 0;
+      const endZ = 4.5 * saberScale; // Blade length scaled
+      const bladeRadius = 0.15 * saberScale; // Blade thickness scaled
+      const steps = 12;
       
-      return bounds.containsPoint(localPos);
+      for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          const localZ = startZ + (t * (endZ - startZ));
+          
+          // Center point
+          const centerPoint = new THREE.Vector3(0, 0, localZ);
+          centerPoint.applyMatrix4(saberGroup.matrixWorld);
+          points.push(centerPoint);
+          
+          // Add points around the blade circumference for better collision detection
+          // This accounts for the blade's thickness when scaled up
+          const offsets = [
+              new THREE.Vector3(bladeRadius, 0, localZ),
+              new THREE.Vector3(-bladeRadius, 0, localZ),
+              new THREE.Vector3(0, bladeRadius, localZ),
+              new THREE.Vector3(0, -bladeRadius, localZ),
+          ];
+          
+          for (const offset of offsets) {
+              const point = offset.clone();
+              point.applyMatrix4(saberGroup.matrixWorld);
+              points.push(point);
+          }
+      }
+      return points;
   };
 
-  const checkBlockCollision = (saberGroup: THREE.Group, blockWorldPos: THREE.Vector3) => {
-      // Use visual size * 1.1 multiplier
-      const halfSize = (GAME_CONFIG.BLOCK_SIZE * debugConfig.blockScale * 1.1) / 2;
+  const checkSaberIntersection = (saberGroup: THREE.Group, blockWorldPos: THREE.Vector3, prevBladePoints: THREE.Vector3[]) => {
+      // 1. Define Block AABB in World Space
+      // Use 1.1x scaling + Expansion for "Any Point" logic
+      const size = GAME_CONFIG.BLOCK_SIZE * debugConfig.blockScale * 1.1; 
+      const halfSize = size / 2;
       
-      const points = [
-          blockWorldPos, 
-          new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y + halfSize, blockWorldPos.z + halfSize),
-          new THREE.Vector3(blockWorldPos.x - halfSize, blockWorldPos.y + halfSize, blockWorldPos.z + halfSize),
-          new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y - halfSize, blockWorldPos.z + halfSize),
-          new THREE.Vector3(blockWorldPos.x - halfSize, blockWorldPos.y - halfSize, blockWorldPos.z + halfSize),
-          new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y + halfSize, blockWorldPos.z - halfSize),
-          new THREE.Vector3(blockWorldPos.x - halfSize, blockWorldPos.y + halfSize, blockWorldPos.z - halfSize),
-          new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y - halfSize, blockWorldPos.z - halfSize),
-          new THREE.Vector3(blockWorldPos.x - halfSize, blockWorldPos.y - halfSize, blockWorldPos.z - halfSize),
-      ];
+      const min = new THREE.Vector3(blockWorldPos.x - halfSize, blockWorldPos.y - halfSize, blockWorldPos.z - halfSize);
+      const max = new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y + halfSize, blockWorldPos.z + halfSize);
+      const blockBox = new THREE.Box3(min, max);
 
-      for (const p of points) {
-          if (checkSaberCollision(saberGroup, p)) return true;
+      // Expand the block box to catch fast swings - scales with saber size
+      const expansionAmount = 0.5 * debugConfig.saberScale;
+      blockBox.expandByScalar(expansionAmount);
+
+      // 2. Get current blade points (scaled)
+      const currentBladePoints = getSaberBladePoints(saberGroup, debugConfig.saberScale);
+      
+      // 3. Check current frame collision
+      for (const point of currentBladePoints) {
+          if (blockBox.containsPoint(point)) {
+              return true;
+          }
       }
+
+      // 4. Sweep Detection: Check interpolated positions between frames
+      // This catches fast swings that might skip over the block
+      if (prevBladePoints.length > 0) {
+          const interpSteps = 5; // Check 5 intermediate positions
+          for (let i = 0; i < currentBladePoints.length; i++) {
+              const currPoint = currentBladePoints[i];
+              const prevPoint = prevBladePoints[i] || currPoint;
+              
+              for (let s = 1; s <= interpSteps; s++) {
+                  const t = s / (interpSteps + 1);
+                  const interpPoint = new THREE.Vector3().lerpVectors(prevPoint, currPoint, t);
+                  
+                  if (blockBox.containsPoint(interpPoint)) {
+                      return true;
+                  }
+              }
+          }
+          
+          // 5. Triangle-based sweep collision for the blade surface
+          // Check if any triangle formed by consecutive blade edges intersects the box
+          for (let i = 0; i < currentBladePoints.length - 1; i++) {
+              const curr0 = currentBladePoints[i];
+              const curr1 = currentBladePoints[i + 1];
+              const prev0 = prevBladePoints[i] || curr0;
+              const prev1 = prevBladePoints[i + 1] || curr1;
+              
+              // Check center of the swept quad
+              const center = new THREE.Vector3()
+                  .add(curr0).add(curr1).add(prev0).add(prev1)
+                  .multiplyScalar(0.25);
+              
+              if (blockBox.containsPoint(center)) {
+                  return true;
+              }
+          }
+      }
+
       return false;
+  };
+
+  const checkBlockCollision = (saberGroup: THREE.Group, blockWorldPos: THREE.Vector3, prevBladePoints: THREE.Vector3[]) => {
+      // Use Dense Point Sampling with Sweep Detection
+      return checkSaberIntersection(saberGroup, blockWorldPos, prevBladePoints);
   };
 
   const updateAvatar = (lm: NormalizedLandmark[]) => {
@@ -828,6 +933,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const rElbow = getPos(14);
       const lWrist = getPos(15);
       const rWrist = getPos(16);
+      const lPalm = getPos(19);  // Left index finger base (palm center)
+      const rPalm = getPos(20);  // Right index finger base (palm center)
       const lHip = getPos(23);
       const rHip = getPos(24);
 
@@ -849,30 +956,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       updateLine(leftArm, [lShoulder, lElbow, lWrist]);
       updateLine(rightArm, [rShoulder, rElbow, rWrist]);
 
-      return { lWrist, rWrist, lElbow, rElbow };
+      return { lWrist, rWrist, lElbow, rElbow, lPalm, rPalm };
   };
 
   // --- Main Loop ---
 
-  const spawnBlock = (time: number) => {
-    if (time < nextSpawnTime.current) return;
-    const beatInterval = 60000 / GAME_CONFIG.BPM;
-    nextSpawnTime.current = time + beatInterval;
-
-    const pattern = BEAT_PATTERNS[Math.floor(Math.random() * BEAT_PATTERNS.length)];
-    const type = pattern[Math.floor(Math.random() * pattern.length)] as BlockType | null;
-    if (!type) return;
-
-    const trackIndex = Math.floor(Math.random() * TRACK_LAYOUT.length);
+  const spawnSingleBlock = (trackLabel: string, time: number) => {
+    const trackIndex = getTrackIndexByLabel(trackLabel);
     const target = TRACK_LAYOUT[trackIndex];
+    const type = getTrackType(trackLabel);
     
-    nextTrackFlash.current = trackIndex;
-    setTimeout(() => { nextTrackFlash.current = null; }, 500);
-
     const id = Math.random().toString(36);
     const mesh = createBlockMesh(type);
     
-    mesh.position.set(0, 0, GAME_CONFIG.SPAWN_Z);
+    // Calculate 3D Target (at Z=0)
+    const target3D = mapTo3D(target.x, target.y, 0, true);
+    
+    // Calculate 3D Start (at SPAWN_Z)
+    const spreadFactor = 1.3;
+    const startX = target3D.x * spreadFactor;
+    const startY = target3D.y * spreadFactor;
+    const startPos = new THREE.Vector3(startX, startY, GAME_CONFIG.SPAWN_Z);
+
+    mesh.position.copy(startPos);
     
     if (sceneRef.current) sceneRef.current.add(mesh);
     blockMeshes.current.set(id, mesh);
@@ -882,11 +988,66 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       type,
       spawnTime: time,
       targetPos: { x: target.x, y: target.y },
-      position: { x: 0, y: 0, z: GAME_CONFIG.SPAWN_Z },
+      startPos: startPos,
+      endPos: target3D,
+      position: { x: startPos.x, y: startPos.y, z: startPos.z },
       hit: false,
       missed: false,
       trackIndex
     });
+    
+    return trackIndex;
+  };
+
+  const spawnBlock = (time: number) => {
+    if (time < nextSpawnTime.current) return;
+    const beatInterval = 60000 / GAME_CONFIG.BPM;
+    nextSpawnTime.current = time + beatInterval;
+
+    // Get current beat from beatmap
+    const measure = BEAT_MAP[currentMeasure.current];
+    if (!measure) {
+      // Loop back to start when beatmap ends
+      currentMeasure.current = 0;
+      currentBeat.current = 0;
+      return;
+    }
+    
+    const beatData = measure[currentBeat.current];
+    
+    // Advance to next beat
+    currentBeat.current++;
+    if (currentBeat.current >= measure.length) {
+      currentBeat.current = 0;
+      currentMeasure.current++;
+      // Loop beatmap
+      if (currentMeasure.current >= BEAT_MAP.length) {
+        currentMeasure.current = 0;
+      }
+    }
+    
+    // Skip if null (rest)
+    if (beatData === null) return;
+    
+    const spawnedTracks: number[] = [];
+    
+    if (Array.isArray(beatData)) {
+      // Multiple simultaneous blocks
+      for (const trackLabel of beatData) {
+        const trackIdx = spawnSingleBlock(trackLabel, time);
+        spawnedTracks.push(trackIdx);
+      }
+    } else {
+      // Single block
+      const trackIdx = spawnSingleBlock(beatData, time);
+      spawnedTracks.push(trackIdx);
+    }
+    
+    // Flash the spawned tracks
+    if (spawnedTracks.length > 0) {
+      nextTrackFlash.current = spawnedTracks;
+      setTimeout(() => { nextTrackFlash.current = null; }, 500);
+    }
   };
 
   // Effect to sync settings with meshes
@@ -894,6 +1055,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (leftSaberRef.current) leftSaberRef.current.scale.setScalar(debugConfig.saberScale);
     if (rightSaberRef.current) rightSaberRef.current.scale.setScalar(debugConfig.saberScale);
     if (avatarGroupRef.current) avatarGroupRef.current.visible = debugConfig.showAvatar;
+    if (leftTrailRef.current) leftTrailRef.current.visible = debugConfig.showTrail;
+    if (rightTrailRef.current) rightTrailRef.current.visible = debugConfig.showTrail;
     
     blockMeshes.current.forEach((mesh) => {
         mesh.scale.setScalar(debugConfig.blockScale);
@@ -932,17 +1095,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             currentLeftPos = avatarData.lWrist;
             currentRightPos = avatarData.rWrist;
 
-            // Update Sabers (Attached to Wrist, Pointing away from Elbow)
+            // Update Sabers (Attached to Wrist, Pointing toward Palm)
             if (leftSaberRef.current) {
                 leftSaberRef.current.position.copy(currentLeftPos);
-                // Direction: Elbow -> Wrist (extend outwards)
-                const dir = new THREE.Vector3().subVectors(currentLeftPos, avatarData.lElbow).normalize();
+                // Direction: Wrist -> Palm (extend through hand)
+                const dir = new THREE.Vector3().subVectors(avatarData.lPalm, currentLeftPos).normalize();
                 leftSaberRef.current.lookAt(currentLeftPos.clone().add(dir));
                 leftSaberRef.current.updateMatrixWorld(true);
             }
             if (rightSaberRef.current) {
                 rightSaberRef.current.position.copy(currentRightPos);
-                const dir = new THREE.Vector3().subVectors(currentRightPos, avatarData.rElbow).normalize();
+                // Direction: Wrist -> Palm (extend through hand)
+                const dir = new THREE.Vector3().subVectors(avatarData.rPalm, currentRightPos).normalize();
                 rightSaberRef.current.lookAt(currentRightPos.clone().add(dir));
                 rightSaberRef.current.updateMatrixWorld(true);
             }
@@ -952,9 +1116,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
              currentRightPos = mapTo3D(rw.x, rw.y, rw.z);
         }
         
-        // Update Trails
-        updateTrail(leftTrailRef.current, leftTrailHistory, leftSaberRef.current);
-        updateTrail(rightTrailRef.current, rightTrailHistory, rightSaberRef.current);
+        // Update Trails (with scale)
+        updateTrail(leftTrailRef.current, leftTrailHistory, leftSaberRef.current, debugConfig.saberScale);
+        updateTrail(rightTrailRef.current, rightTrailHistory, rightSaberRef.current, debugConfig.saberScale);
 
         // Velocity Calculation
         leftVelocity.current = currentLeftPos.distanceTo(prevLeftPos.current) / dt;
@@ -980,7 +1144,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // Update Track Flash Effects
         trackLinesRef.current.forEach((line, idx) => {
             const material = line.material as THREE.LineBasicMaterial;
-            if (nextTrackFlash.current === idx) {
+            const isFlashing = nextTrackFlash.current?.includes(idx) ?? false;
+            if (isFlashing) {
                 material.opacity = 0.8;
                 material.color.setHex(GAME_CONFIG.COLORS.WHITE);
                 material.linewidth = 2;
@@ -995,37 +1160,44 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         blocks.current.forEach(block => {
             if (block.hit || block.missed) return;
 
-            // Move Block
-            const target3D = mapTo3D(block.targetPos.x, block.targetPos.y, 0);
+            // Move Block (Rail Logic)
             block.position.z += GAME_CONFIG.BLOCK_SPEED * dt;
-            const t = (block.position.z - GAME_CONFIG.SPAWN_Z) / (0 - GAME_CONFIG.SPAWN_Z);
-            block.position.x = target3D.x * t;
-            block.position.y = target3D.y * t;
+            
+            // Calculate progress (t) based on Z. 0 at Start, 1 at Target.
+            // Start: SPAWN_Z (-50). Target: 0.
+            const totalDist = 0 - GAME_CONFIG.SPAWN_Z;
+            const currentDist = block.position.z - GAME_CONFIG.SPAWN_Z;
+            const t = Math.max(0, currentDist / totalDist);
+
+            // Lerp Position
+            if (block.startPos && block.endPos) {
+                 const newPos = new THREE.Vector3().lerpVectors(block.startPos, block.endPos, t);
+                 block.position.x = newPos.x;
+                 block.position.y = newPos.y;
+            }
 
             const mesh = blockMeshes.current.get(block.id);
             if (mesh) {
                 mesh.position.set(block.position.x, block.position.y, block.position.z);
                 
-                // Visual Cues
-                const totalDist = Math.abs(GAME_CONFIG.HIT_Z - GAME_CONFIG.SPAWN_Z);
-                const currentDist = block.position.z - GAME_CONFIG.SPAWN_Z;
-                const progress = Math.min(Math.max(currentDist / totalDist, 0), 1.2); 
+                // Visual Cues: Filling Wireframe
+                const hitStartZ = GAME_CONFIG.HIT_Z - 3.5; 
+                const spawnZ = GAME_CONFIG.SPAWN_Z; 
+                
+                let fillProgress = (block.position.z - spawnZ) / (hitStartZ - spawnZ);
+                fillProgress = Math.max(0, Math.min(1, fillProgress));
 
                 const core = mesh.getObjectByName('core') as THREE.Mesh;
                 const wireframe = mesh.getObjectByName('wireframe') as THREE.LineSegments;
+                
                 if (core && wireframe) {
                     const coreMat = core.material as THREE.MeshBasicMaterial;
-                    const wireMat = wireframe.material as THREE.LineBasicMaterial;
-                    coreMat.opacity = 0.1 + (Math.max(0, progress) * 0.5);
-                    wireMat.opacity = 0.2 + (Math.max(0, progress) * 0.8);
-                }
-
-                const ring = mesh.getObjectByName('ring') as THREE.Mesh;
-                if (ring) {
-                    const scaleDiff = GAME_CONFIG.APPROACH_RING_START_SCALE - 1.0;
-                    const newScale = GAME_CONFIG.APPROACH_RING_START_SCALE - (scaleDiff * progress);
-                    ring.scale.setScalar(Math.max(newScale, 0));
-                    ring.visible = block.position.z < GAME_CONFIG.HIT_Z + 1;
+                    const wireMat = wireframe.material as THREE.LineDashedMaterial; 
+                    
+                    coreMat.opacity = 0.1 + (fillProgress * 0.5);
+                    wireMat.dashSize = fillProgress * GAME_CONFIG.BLOCK_SIZE;
+                    wireMat.gapSize = GAME_CONFIG.BLOCK_SIZE - wireMat.dashSize;
+                    wireMat.opacity = 0.5 + (fillProgress * 0.5);
                 }
             }
 
@@ -1043,19 +1215,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
             }
 
-            // Hit Logic
-            if (Math.abs(block.position.z) < 3.5 && !block.hit) { 
+            // Hit Logic - Extended Z range for better hit detection
+            if (block.position.z > -5 && block.position.z < 5 && !block.hit) { 
                 let hitBy: 'left' | 'right' | null = null;
                 const blockCenter = new THREE.Vector3(block.position.x, block.position.y, block.position.z);
                 
-                // Check Left Saber
-                if (leftSaberRef.current && leftVelocity.current > GAME_CONFIG.VELOCITY_THRESHOLD) {
-                    if (checkBlockCollision(leftSaberRef.current, blockCenter)) hitBy = 'left';
+                // Check Left Saber with sweep detection
+                if (leftSaberRef.current) {
+                    if (checkBlockCollision(leftSaberRef.current, blockCenter, prevLeftBladePoints.current)) hitBy = 'left';
                 }
                 
                 // Check Right Saber (if not already hit by left)
-                if (!hitBy && rightSaberRef.current && rightVelocity.current > GAME_CONFIG.VELOCITY_THRESHOLD) {
-                    if (checkBlockCollision(rightSaberRef.current, blockCenter)) hitBy = 'right';
+                if (!hitBy && rightSaberRef.current) {
+                    if (checkBlockCollision(rightSaberRef.current, blockCenter, prevRightBladePoints.current)) hitBy = 'right';
                 }
 
                 if (hitBy) {
@@ -1159,6 +1331,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
         }
     }
+    
+    // --- Update Previous Blade Points for Sweep Detection (with scale) ---
+    if (leftSaberRef.current) {
+        prevLeftBladePoints.current = getSaberBladePoints(leftSaberRef.current, debugConfig.saberScale);
+    }
+    if (rightSaberRef.current) {
+        prevRightBladePoints.current = getSaberBladePoints(rightSaberRef.current, debugConfig.saberScale);
+    }
   };
 
   const renderLoop = useCallback((time: number) => {
@@ -1227,6 +1407,98 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         rawLandmarks.current = results.poseLandmarks;
     }
   }, []);
+
+  // Camera preview render loop
+  const cameraPreviewAnimationRef = useRef<number | null>(null);
+  
+  const drawCameraPreview = useCallback(() => {
+    if (cameraPreviewRef.current && videoRef.current && debugConfig.showCameraPreview) {
+        const canvas = cameraPreviewRef.current;
+        const ctx = canvas.getContext('2d');
+        const video = videoRef.current;
+        
+        if (ctx && video.readyState >= 2) {
+            // Draw video frame (mirrored)
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+            
+            // Draw pose landmarks for wrists and palms
+            if (rawLandmarks.current) {
+                const lm = rawLandmarks.current;
+                const leftWrist = lm[15];  // Left wrist
+                const rightWrist = lm[16]; // Right wrist
+                const leftPalm = lm[19];   // Left index finger base (palm center)
+                const rightPalm = lm[20];  // Right index finger base (palm center)
+                
+                const drawPoint = (landmark: NormalizedLandmark, color: string, size: number = 8) => {
+                    // Mirror X coordinate
+                    const x = (1 - landmark.x) * canvas.width;
+                    const y = landmark.y * canvas.height;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, size, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    
+                    // Glow effect
+                    ctx.beginPath();
+                    ctx.arc(x, y, size + 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                };
+                
+                const drawLine = (from: NormalizedLandmark, to: NormalizedLandmark, color: string) => {
+                    const x1 = (1 - from.x) * canvas.width;
+                    const y1 = from.y * canvas.height;
+                    const x2 = (1 - to.x) * canvas.width;
+                    const y2 = to.y * canvas.height;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                };
+                
+                // Draw wrist to palm lines (saber direction)
+                drawLine(leftWrist, leftPalm, '#00f3ff');
+                drawLine(rightWrist, rightPalm, '#ff00ff');
+                
+                // Draw points - wrists smaller, palms larger (palm is saber tip direction)
+                drawPoint(leftWrist, '#00f3ff', 6);
+                drawPoint(rightWrist, '#ff00ff', 6);
+                drawPoint(leftPalm, '#00f3ff', 10);
+                drawPoint(rightPalm, '#ff00ff', 10);
+            }
+        }
+    }
+    
+    if (debugConfig.showCameraPreview) {
+        cameraPreviewAnimationRef.current = requestAnimationFrame(drawCameraPreview);
+    }
+  }, [debugConfig.showCameraPreview]);
+
+  // Effect to manage camera preview animation
+  useEffect(() => {
+    if (debugConfig.showCameraPreview) {
+        cameraPreviewAnimationRef.current = requestAnimationFrame(drawCameraPreview);
+    } else {
+        if (cameraPreviewAnimationRef.current) {
+            cancelAnimationFrame(cameraPreviewAnimationRef.current);
+            cameraPreviewAnimationRef.current = null;
+        }
+    }
+    
+    return () => {
+        if (cameraPreviewAnimationRef.current) {
+            cancelAnimationFrame(cameraPreviewAnimationRef.current);
+        }
+    };
+  }, [debugConfig.showCameraPreview, drawCameraPreview]);
 
   useEffect(() => {
     const startPose = async () => {
@@ -1362,6 +1634,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       <button onClick={toggleMute} className="absolute top-4 right-4 z-50 text-white/50 hover:text-white transition-colors">
         {isMuted ? <VolumeX /> : <Volume2 />}
       </button>
+
+      {/* Camera Preview Window */}
+      {debugConfig.showCameraPreview && (
+          <div className="absolute bottom-4 right-4 z-40 rounded-lg overflow-hidden border-2 border-gray-700 shadow-xl bg-black">
+              <div className="relative">
+                  <canvas 
+                      ref={cameraPreviewRef}
+                      width={240}
+                      height={180}
+                      className="block"
+                  />
+                  <div className="absolute top-1 left-1 px-2 py-0.5 bg-black/70 rounded text-[10px] font-mono text-gray-400 uppercase">
+                      Camera
+                  </div>
+                  <div className="absolute bottom-1 left-1 flex gap-2">
+                      <span className="px-1.5 py-0.5 bg-[#00f3ff]/30 rounded text-[8px] font-mono text-[#00f3ff]">L</span>
+                      <span className="px-1.5 py-0.5 bg-[#ff00ff]/30 rounded text-[8px] font-mono text-[#ff00ff]">R</span>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {permissionError && (
           <div className="absolute inset-0 flex items-center justify-center bg-black text-white z-50">
