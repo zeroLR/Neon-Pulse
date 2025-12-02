@@ -56,6 +56,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const flashRef = useRef<HTMLDivElement>(null); // Screen flash overlay
   const poseService = useRef<PoseService | null>(null);
+  const youtubePlayerRef = useRef<HTMLIFrameElement>(null);
 
   // --- Three.js Refs ---
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -859,15 +860,58 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Mute toggle now uses hook
   const toggleMute = audio.toggleMute;
 
+  // YouTube player control functions
+  const pauseYouTube = () => {
+    if (youtubePlayerRef.current?.contentWindow) {
+      youtubePlayerRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*'
+      );
+    }
+  };
+  
+  const playYouTube = () => {
+    if (youtubePlayerRef.current?.contentWindow) {
+      youtubePlayerRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: 'playVideo' }), '*'
+      );
+    }
+  };
+
   // Handle Pause
-  const handlePause = () => setIsPaused(true);
+  const handlePause = () => {
+    setIsPaused(true);
+    pauseYouTube();
+  };
   const handleResume = () => {
       setIsPaused(false);
-      startCountdown(); // Resume with countdown
+      startCountdown(); // Resume with countdown, YouTube will play when countdown ends
   };
   const handleExit = () => {
       setGameStatus('menu');
   }
+
+  // Keyboard shortcut for pause (ESC)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && gameStatus === 'playing') {
+        if (isPaused) {
+          handleResume();
+        } else {
+          handlePause();
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameStatus, isPaused]);
+  
+  // Play YouTube when countdown ends (countdown becomes null and game is active)
+  useEffect(() => {
+    if (countdown === null && isGameActive.current && !isPaused && beatmap.youtubeId) {
+      playYouTube();
+    }
+  }, [countdown, isPaused, beatmap.youtubeId]);
 
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
@@ -951,21 +995,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         </div>
       )}
 
-       {/* Bottom Left Pause Button (Visual only, Logic in handlePause) */}
-       {gameStatus === 'playing' && !isPaused && (
-           <div className="absolute bottom-8 left-8 z-30">
-               <button 
-                   onClick={handlePause}
-                   className="p-3 bg-gray-900/50 border border-gray-700 rounded-full text-white hover:bg-white hover:text-black transition-all hover:scale-110"
-               >
-                   <Pause size={24} fill="currentColor" />
-               </button>
-           </div>
-       )}
-
-      <button onClick={toggleMute} className="absolute top-4 right-4 z-50 text-white/50 hover:text-white transition-colors">
-        {audio.isMuted ? <VolumeX /> : <Volume2 />}
-      </button>
+      {/* Top Right Control Buttons */}
+      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+        {/* Pause Button */}
+        {gameStatus === 'playing' && !isPaused && (
+          <button 
+              onClick={handlePause}
+              className="p-2 bg-gray-900/50 border border-gray-700 rounded-full text-white/50 hover:text-white hover:bg-white hover:text-black transition-all hover:scale-110"
+          >
+              <Pause size={20} fill="currentColor" />
+          </button>
+        )}
+        
+        {/* Mute Button */}
+        <button onClick={toggleMute} className="text-white/50 hover:text-white transition-colors">
+          {audio.isMuted ? <VolumeX /> : <Volume2 />}
+        </button>
+      </div>
 
       {/* Camera Preview Window */}
       {debugConfig.showCameraPreview && (
@@ -993,10 +1039,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           <div className="absolute bottom-4 left-4 z-40 rounded-lg overflow-hidden border-2 border-gray-700 shadow-xl bg-black">
               <div className="relative">
                   <iframe
+                      ref={youtubePlayerRef}
                       id="youtube-player"
                       width="280"
                       height="158"
-                      src={`https://www.youtube.com/embed/${beatmap.youtubeId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`}
+                      src={`https://www.youtube.com/embed/${beatmap.youtubeId}?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1`}
                       title={beatmap.title}
                       frameBorder="0"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
