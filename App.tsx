@@ -2,18 +2,34 @@ import React, { useState, useRef } from 'react';
 import GameCanvas from './components/GameCanvas';
 import IntroScreen from './components/IntroScreen';
 import GameOverScreen from './components/GameOverScreen';
-import { GameStatus } from './types';
+import BeatmapSelectScreen from './components/BeatmapSelectScreen';
+import { GameStatus, Beatmap } from './types';
+import { DEFAULT_BEATMAP } from './constants';
 
 const App: React.FC = () => {
   const [gameStatus, setGameStatus] = useState<GameStatus>('loading');
   const [finalScore, setFinalScore] = useState(0);
+  const [selectedBeatmap, setSelectedBeatmap] = useState<Beatmap>(DEFAULT_BEATMAP);
   
   // Track if user has calibrated in this session (for manual recalibration)
   const hasCalibrated = useRef(false);
 
   const handleStart = () => {
-    // Skip calibration check, go directly to playing
+    // Go to beatmap selection
+    setGameStatus('beatmap-select');
+  };
+
+  const handleBeatmapSelect = (beatmap: Beatmap) => {
+    setSelectedBeatmap(beatmap);
     setGameStatus('playing');
+  };
+
+  const handleBackToMenu = () => {
+    setGameStatus('menu');
+  };
+
+  const handleBackToBeatmapSelect = () => {
+    setGameStatus('beatmap-select');
   };
 
   const handleCalibrationComplete = () => {
@@ -26,7 +42,7 @@ const App: React.FC = () => {
   };
 
   const handleRestart = () => {
-    // Skip calibration on restart
+    // Restart the same beatmap
     setGameStatus('playing');
   };
 
@@ -43,6 +59,7 @@ const App: React.FC = () => {
         onGameOver={handleGameOver}
         onCalibrationComplete={handleCalibrationComplete}
         onRecalibrateRequest={handleRecalibrate}
+        beatmap={selectedBeatmap}
       />
 
       {(gameStatus === 'loading' || gameStatus === 'menu') && (
@@ -52,10 +69,19 @@ const App: React.FC = () => {
         />
       )}
 
+      {gameStatus === 'beatmap-select' && (
+        <BeatmapSelectScreen
+          onSelect={handleBeatmapSelect}
+          onBack={handleBackToMenu}
+        />
+      )}
+
       {gameStatus === 'gameover' && (
         <GameOverScreen 
-          score={finalScore} 
-          onRestart={handleRestart} 
+          score={finalScore}
+          beatmap={selectedBeatmap}
+          onRestart={handleRestart}
+          onBackToMenu={handleBackToBeatmapSelect}
         />
       )}
       

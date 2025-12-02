@@ -1,5 +1,5 @@
 
-import { BlockNote, BlockType, SlashDirection, BeatData } from './types';
+import { BlockNote, BlockType, SlashDirection, BeatData, Beatmap } from './types';
 
 export const GAME_CONFIG = {
   ASPECT_RATIO: 16 / 9,
@@ -223,7 +223,7 @@ export const DIRECTION_ANGLES: Record<SlashDirection, number> = {
 // Demo Beatmap - Extended format with direction support
 // Shorthand: just track label = any direction
 // Full: { track: 'L1', direction: 'down', color: 'left' }
-export const BEAT_MAP: BeatData[][] = [
+const NEON_DREAMS_DATA: BeatData[][] = [
   // Measure 1: Simple alternating with directions
   [
     { track: 'L2', direction: 'down' },
@@ -352,3 +352,371 @@ export const BEAT_MAP: BeatData[][] = [
     [{ track: 'L4', direction: 'up-right' }, { track: 'R4', direction: 'up-left' }]
   ],
 ];
+
+// Tutorial Beatmap - Easy introduction
+const TUTORIAL_DATA: BeatData[][] = [
+  // Measure 1: Very simple left-right
+  [{ track: 'L2', direction: 'any' }, null, null, null],
+  [{ track: 'R2', direction: 'any' }, null, null, null],
+  [{ track: 'L2', direction: 'any' }, null, { track: 'R2', direction: 'any' }, null],
+  [null, null, null, null],
+  
+  // Measure 5-8: Introduce directions
+  [{ track: 'L2', direction: 'down' }, null, null, null],
+  [{ track: 'R2', direction: 'down' }, null, null, null],
+  [{ track: 'L2', direction: 'right' }, null, { track: 'R2', direction: 'left' }, null],
+  [null, null, null, null],
+];
+
+// Cyber Rush Beatmap - Fast and intense
+const CYBER_RUSH_DATA: BeatData[][] = [
+  // Measure 1: Quick alternating
+  [
+    { track: 'L2', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    { track: 'L3', direction: 'down' },
+    { track: 'R3', direction: 'down' }
+  ],
+  // Measure 2: Simultaneous hits
+  [
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }],
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }]
+  ],
+  // Measure 3: Cross patterns
+  [
+    { track: 'L1', direction: 'down-right' },
+    { track: 'R4', direction: 'up-left' },
+    { track: 'R1', direction: 'down-left' },
+    { track: 'L4', direction: 'up-right' }
+  ],
+  // Measure 4: Intense finish
+  [
+    [{ track: 'L1', direction: 'down' }, { track: 'R1', direction: 'down' }],
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }],
+    [{ track: 'L4', direction: 'down' }, { track: 'R4', direction: 'down' }]
+  ],
+  // Repeat with variations
+  [
+    { track: 'T1', direction: 'down' },
+    { track: 'T2', direction: 'down' },
+    { track: 'B1', direction: 'up' },
+    { track: 'B2', direction: 'up' }
+  ],
+  [
+    [{ track: 'L1', direction: 'right' }, { track: 'R1', direction: 'left' }],
+    null,
+    [{ track: 'L4', direction: 'right' }, { track: 'R4', direction: 'left' }],
+    null
+  ],
+  [
+    { track: 'L1', direction: 'down' },
+    { track: 'L2', direction: 'down' },
+    { track: 'L3', direction: 'down' },
+    { track: 'L4', direction: 'down' }
+  ],
+  [
+    { track: 'R1', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    { track: 'R3', direction: 'down' },
+    { track: 'R4', direction: 'down' }
+  ],
+];
+
+// Zen Flow Beatmap - Slower, more deliberate
+const ZEN_FLOW_DATA: BeatData[][] = [
+  // Measure 1: Slow and steady
+  [{ track: 'L2', direction: 'down' }, null, null, null],
+  [null, null, { track: 'R2', direction: 'down' }, null],
+  [{ track: 'L3', direction: 'up' }, null, null, null],
+  [null, null, { track: 'R3', direction: 'up' }, null],
+  
+  // Measure 5-8: Flowing patterns
+  [{ track: 'T1', direction: 'down' }, null, { track: 'T2', direction: 'down' }, null],
+  [null, null, null, null],
+  [{ track: 'B1', direction: 'up' }, null, { track: 'B2', direction: 'up' }, null],
+  [null, null, null, null],
+  
+  // Measure 9-12: Diagonal flow
+  [{ track: 'L1', direction: 'down-right' }, null, null, null],
+  [null, { track: 'R1', direction: 'down-left' }, null, null],
+  [null, null, { track: 'L4', direction: 'up-right' }, null],
+  [null, null, null, { track: 'R4', direction: 'up-left' }],
+];
+
+// Helper to count notes in a beatmap
+const countNotes = (data: BeatData[][]): number => {
+  let count = 0;
+  for (const measure of data) {
+    for (const beat of measure) {
+      if (beat === null) continue;
+      if (Array.isArray(beat)) {
+        count += beat.length;
+      } else {
+        count += 1;
+      }
+    }
+  }
+  return count;
+};
+
+// Calculate duration based on BPM and measures
+const calculateDuration = (measures: number, bpm: number): string => {
+  const beatsPerMeasure = 4;
+  const totalBeats = measures * beatsPerMeasure;
+  const totalSeconds = (totalBeats / bpm) * 60;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
+
+// Faded Beatmap - YouTube music source (Alan Walker)
+// BPM: ~90, Progressive EDM style with build-ups and drops
+const FADED_DATA: BeatData[][] = [
+  // === INTRO (Measures 1-4) - Slow atmospheric start ===
+  [null, null, null, null],
+  [{ track: 'L2', direction: 'down' }, null, null, null],
+  [null, null, null, null],
+  [null, null, { track: 'R2', direction: 'down' }, null],
+  
+  // === VERSE 1 (Measures 5-12) - Building tension ===
+  [{ track: 'L2', direction: 'down' }, null, { track: 'R2', direction: 'down' }, null],
+  [null, null, null, null],
+  [{ track: 'L3', direction: 'down' }, null, { track: 'R3', direction: 'down' }, null],
+  [null, null, null, null],
+  
+  [{ track: 'T1', direction: 'down' }, null, null, null],
+  [null, null, { track: 'T2', direction: 'down' }, null],
+  [{ track: 'L2', direction: 'right' }, null, { track: 'R2', direction: 'left' }, null],
+  [null, null, null, null],
+  
+  // === PRE-CHORUS (Measures 13-16) - Intensity building ===
+  [
+    { track: 'L2', direction: 'down' },
+    null,
+    { track: 'R2', direction: 'down' },
+    null
+  ],
+  [
+    { track: 'L3', direction: 'down' },
+    null,
+    { track: 'R3', direction: 'down' },
+    null
+  ],
+  [
+    { track: 'L2', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    { track: 'L3', direction: 'down' },
+    { track: 'R3', direction: 'down' }
+  ],
+  [
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    null,
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }],
+    null
+  ],
+  
+  // === DROP 1 (Measures 17-24) - Main energy ===
+  [
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    { track: 'T1', direction: 'down' },
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }],
+    { track: 'T2', direction: 'down' }
+  ],
+  [
+    { track: 'L1', direction: 'down' },
+    { track: 'R1', direction: 'down' },
+    { track: 'L2', direction: 'down' },
+    { track: 'R2', direction: 'down' }
+  ],
+  [
+    [{ track: 'B1', direction: 'up' }, { track: 'B2', direction: 'up' }],
+    null,
+    [{ track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    null
+  ],
+  [
+    { track: 'L3', direction: 'right' },
+    { track: 'R3', direction: 'left' },
+    { track: 'L2', direction: 'right' },
+    { track: 'R2', direction: 'left' }
+  ],
+  
+  [
+    { track: 'L1', direction: 'down-right' },
+    { track: 'R1', direction: 'down-left' },
+    { track: 'L4', direction: 'up-right' },
+    { track: 'R4', direction: 'up-left' }
+  ],
+  [
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }],
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }]
+  ],
+  [
+    { track: 'T1', direction: 'down' },
+    { track: 'T2', direction: 'down' },
+    { track: 'B1', direction: 'up' },
+    { track: 'B2', direction: 'up' }
+  ],
+  [
+    [{ track: 'L1', direction: 'right' }, { track: 'R1', direction: 'left' }],
+    null,
+    [{ track: 'L4', direction: 'right' }, { track: 'R4', direction: 'left' }],
+    null
+  ],
+  
+  // === BREAKDOWN (Measures 25-28) - Calm section ===
+  [{ track: 'L2', direction: 'any' }, null, null, null],
+  [null, null, { track: 'R2', direction: 'any' }, null],
+  [{ track: 'L3', direction: 'any' }, null, { track: 'R3', direction: 'any' }, null],
+  [null, null, null, null],
+  
+  // === BUILD-UP (Measures 29-32) - Rising tension ===
+  [
+    { track: 'L2', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    null,
+    null
+  ],
+  [
+    { track: 'L2', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    { track: 'L3', direction: 'down' },
+    { track: 'R3', direction: 'down' }
+  ],
+  [
+    { track: 'L1', direction: 'down' },
+    { track: 'R1', direction: 'down' },
+    { track: 'L2', direction: 'down' },
+    { track: 'R2', direction: 'down' }
+  ],
+  [
+    [{ track: 'L1', direction: 'down' }, { track: 'R1', direction: 'down' }],
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }],
+    [{ track: 'L4', direction: 'down' }, { track: 'R4', direction: 'down' }]
+  ],
+  
+  // === DROP 2 / FINALE (Measures 33-40) - Maximum intensity ===
+  [
+    [{ track: 'L1', direction: 'down-right' }, { track: 'R1', direction: 'down-left' }],
+    [{ track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    [{ track: 'L4', direction: 'up-right' }, { track: 'R4', direction: 'up-left' }],
+    [{ track: 'B1', direction: 'up' }, { track: 'B2', direction: 'up' }]
+  ],
+  [
+    { track: 'L1', direction: 'down' },
+    { track: 'L2', direction: 'down' },
+    { track: 'L3', direction: 'down' },
+    { track: 'L4', direction: 'down' }
+  ],
+  [
+    { track: 'R1', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    { track: 'R3', direction: 'down' },
+    { track: 'R4', direction: 'down' }
+  ],
+  [
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }],
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }]
+  ],
+  
+  [
+    [{ track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    { track: 'L2', direction: 'right' },
+    [{ track: 'B1', direction: 'up' }, { track: 'B2', direction: 'up' }],
+    { track: 'R2', direction: 'left' }
+  ],
+  [
+    { track: 'L1', direction: 'down-right' },
+    { track: 'R4', direction: 'up-left' },
+    { track: 'R1', direction: 'down-left' },
+    { track: 'L4', direction: 'up-right' }
+  ],
+  [
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    [{ track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }],
+    [{ track: 'B1', direction: 'up' }, { track: 'B2', direction: 'up' }]
+  ],
+  
+  // === OUTRO (Measure 40) - Final hit ===
+  [
+    [{ track: 'L1', direction: 'down' }, { track: 'R1', direction: 'down' }, { track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    null,
+    null,
+    null
+  ],
+];
+
+// Beatmap Collection
+export const BEATMAPS: Beatmap[] = [
+  {
+    id: 'faded',
+    title: 'Faded',
+    artist: 'Alan Walker',
+    bpm: 90,
+    difficulty: 'normal',
+    difficultyRating: 5,
+    duration: calculateDuration(FADED_DATA.length, 90),
+    noteCount: countNotes(FADED_DATA),
+    data: FADED_DATA,
+    youtubeId: '60ItHLz5WEA',
+  },
+  {
+    id: 'tutorial',
+    title: 'First Steps',
+    artist: 'System',
+    bpm: 100,
+    difficulty: 'easy',
+    difficultyRating: 1,
+    duration: calculateDuration(TUTORIAL_DATA.length, 100),
+    noteCount: countNotes(TUTORIAL_DATA),
+    data: TUTORIAL_DATA,
+  },
+  {
+    id: 'neon-dreams',
+    title: 'Neon Dreams',
+    artist: 'Cyber Pulse',
+    bpm: 128,
+    difficulty: 'normal',
+    difficultyRating: 4,
+    duration: calculateDuration(NEON_DREAMS_DATA.length, 128),
+    noteCount: countNotes(NEON_DREAMS_DATA),
+    data: NEON_DREAMS_DATA,
+  },
+  {
+    id: 'zen-flow',
+    title: 'Zen Flow',
+    artist: 'Digital Meditation',
+    bpm: 90,
+    difficulty: 'easy',
+    difficultyRating: 2,
+    duration: calculateDuration(ZEN_FLOW_DATA.length, 90),
+    noteCount: countNotes(ZEN_FLOW_DATA),
+    data: ZEN_FLOW_DATA,
+  },
+  {
+    id: 'cyber-rush',
+    title: 'Cyber Rush',
+    artist: 'Neon Overdrive',
+    bpm: 150,
+    difficulty: 'hard',
+    difficultyRating: 7,
+    duration: calculateDuration(CYBER_RUSH_DATA.length, 150),
+    noteCount: countNotes(CYBER_RUSH_DATA),
+    data: CYBER_RUSH_DATA,
+  },
+];
+
+// Default beatmap (for backwards compatibility)
+export const DEFAULT_BEATMAP = BEATMAPS.find(b => b.id === 'neon-dreams')!;
+
+// Legacy export for compatibility
+export const BEAT_MAP = DEFAULT_BEATMAP.data;

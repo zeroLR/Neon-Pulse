@@ -2,8 +2,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { PoseService } from '../services/poseService';
-import { GAME_CONFIG, BEAT_MAP, TRACK_LAYOUT, getTrackIndexByLabel, CALIBRATION_CONFIG, parseBeatNote } from '../constants';
-import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig, BlockNote, BeatData, SlashDirection } from '../types';
+import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, CALIBRATION_CONFIG, parseBeatNote } from '../constants';
+import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig, BlockNote, BeatData, SlashDirection, Beatmap } from '../types';
 import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
 import DebugMenu from './DebugMenu';
@@ -37,10 +37,11 @@ import {
 
 interface GameCanvasProps {
   onGameOver: (score: number) => void;
-  gameStatus: 'loading' | 'playing' | 'gameover' | 'menu' | 'calibration';
+  gameStatus: 'loading' | 'playing' | 'gameover' | 'menu' | 'calibration' | 'beatmap-select';
   setGameStatus: (status: any) => void;
   onCalibrationComplete: () => void;
   onRecalibrateRequest: () => void;
+  beatmap: Beatmap;
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
@@ -48,7 +49,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     gameStatus, 
     setGameStatus, 
     onCalibrationComplete,
-    onRecalibrateRequest
+    onRecalibrateRequest,
+    beatmap
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -108,6 +110,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const blocks = useRef<any[]>([]);
   const lastTime = useRef<number>(0);
   const nextSpawnTime = useRef<number>(0);
+  const beatmapCompleted = useRef<boolean>(false);
+  const gameOverDelayTimer = useRef<number | null>(null);
   
   // Use Ref for visual-only state to avoid re-renders resetting the game loop
   const nextTrackFlash = useRef<number[] | null>(null);
@@ -280,6 +284,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Reset beatmap position
     currentMeasure.current = 0;
     currentBeat.current = 0;
+    beatmapCompleted.current = false;
+    if (gameOverDelayTimer.current !== null) {
+      clearTimeout(gameOverDelayTimer.current);
+      gameOverDelayTimer.current = null;
+    }
     
     // Clear trails on restart
     leftTrailHistory.current = [];
@@ -445,15 +454,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const spawnBlock = (time: number) => {
     if (time < nextSpawnTime.current) return;
-    const beatInterval = 60000 / GAME_CONFIG.BPM;
+    if (beatmapCompleted.current) return; // Stop spawning if beatmap completed
+    
+    const beatInterval = 60000 / beatmap.bpm;
     nextSpawnTime.current = time + beatInterval;
 
     // Get current beat from beatmap
-    const measure = BEAT_MAP[currentMeasure.current];
+    const measure = beatmap.data[currentMeasure.current];
     if (!measure) {
-      // Loop back to start when beatmap ends
-      currentMeasure.current = 0;
-      currentBeat.current = 0;
+      // Beatmap ended - mark as completed, but wait for blocks to clear
+      beatmapCompleted.current = true;
       return;
     }
     
@@ -464,9 +474,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (currentBeat.current >= measure.length) {
       currentBeat.current = 0;
       currentMeasure.current++;
-      // Loop beatmap
-      if (currentMeasure.current >= BEAT_MAP.length) {
-        currentMeasure.current = 0;
+      // Check if beatmap ended
+      if (currentMeasure.current >= beatmap.data.length) {
+        // Let the last blocks finish before triggering game over
+        // We'll trigger it on next spawn attempt
       }
     }
     
@@ -586,6 +597,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // --- Gameplay Loop ---
     if (gameStatus === 'playing' && !isPaused && isGameActive.current) {
         spawnBlock(time);
+        
+        // Check if beatmap is completed and all blocks are processed
+        if (beatmapCompleted.current) {
+          const activeBlocks = blocks.current.filter(b => !b.hit && !b.missed);
+          if (activeBlocks.length === 0 && gameOverDelayTimer.current === null) {
+            // All blocks cleared, start 1 second delay before game over
+            gameOverDelayTimer.current = window.setTimeout(() => {
+              onGameOver(stats.current.score);
+              setGameStatus('gameover');
+            }, 1000);
+          }
+        }
 
         // Update Track Flash Effects
         trackLinesRef.current.forEach((line, idx) => {
@@ -775,6 +798,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     window.addEventListener('resize', handleResize);
     return () => {
         window.removeEventListener('resize', handleResize);
+        if (gameOverDelayTimer.current !== null) {
+            clearTimeout(gameOverDelayTimer.current);
+            gameOverDelayTimer.current = null;
+        }
         if (rendererRef.current && containerRef.current) {
             containerRef.current.removeChild(rendererRef.current.domElement);
             rendererRef.current.dispose();
@@ -956,6 +983,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                   <div className="absolute bottom-1 left-1 flex gap-2">
                       <span className="px-1.5 py-0.5 bg-[#00f3ff]/30 rounded text-[8px] font-mono text-[#00f3ff]">L</span>
                       <span className="px-1.5 py-0.5 bg-[#ff00ff]/30 rounded text-[8px] font-mono text-[#ff00ff]">R</span>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* YouTube Video Player - Bottom Left */}
+      {gameStatus === 'playing' && beatmap.youtubeId && (
+          <div className="absolute bottom-4 left-4 z-40 rounded-lg overflow-hidden border-2 border-gray-700 shadow-xl bg-black">
+              <div className="relative">
+                  <iframe
+                      id="youtube-player"
+                      width="280"
+                      height="158"
+                      src={`https://www.youtube.com/embed/${beatmap.youtubeId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`}
+                      title={beatmap.title}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      allowFullScreen
+                      className="block"
+                  />
+                  <div className="absolute top-1 right-1 px-2 py-0.5 bg-black/70 rounded text-[10px] font-mono text-[#00f3ff] uppercase">
+                      ♫ {beatmap.artist}
                   </div>
               </div>
           </div>

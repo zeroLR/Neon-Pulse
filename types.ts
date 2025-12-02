@@ -1,7 +1,24 @@
 
 export type HandType = 'left' | 'right';
 export type BlockType = 'left' | 'right' | 'both';
-export type GameStatus = 'menu' | 'loading' | 'calibration' | 'playing' | 'gameover';
+export type GameStatus = 'menu' | 'loading' | 'calibration' | 'beatmap-select' | 'playing' | 'gameover';
+
+// Beatmap difficulty levels
+export type BeatmapDifficulty = 'easy' | 'normal' | 'hard' | 'expert';
+
+// Beatmap metadata and data
+export interface Beatmap {
+  id: string;
+  title: string;
+  artist: string;
+  bpm: number;
+  difficulty: BeatmapDifficulty;
+  difficultyRating: number; // 1-10 scale
+  duration: string; // e.g., "2:30"
+  noteCount: number;
+  data: BeatData[][];
+  youtubeId?: string; // Optional YouTube video ID for music source
+}
 
 // Slash direction for blocks - indicates the direction player should slash
 export type SlashDirection = 
