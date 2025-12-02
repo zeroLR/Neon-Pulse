@@ -8,9 +8,9 @@
   "youtubeId": "60ItHLz5WEA",
   "data": [
     [null, null, null, null],
-    [{ "track": "L2", "direction": "down" }, null, null, null],
     [null, null, null, null],
-    [null, null, { "track": "R2", "direction": "down" }, null],
+    [null, null, null, null],
+    [null, null, null, null],
     
     [{ "track": "L2", "direction": "down" }, null, { "track": "R2", "direction": "down" }, null],
     [null, null, null, null],
