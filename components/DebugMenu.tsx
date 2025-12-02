@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Settings, Shield, Activity, Box, RefreshCw, Square, User, Sliders } from 'lucide-react';
+import { Settings, Shield, Activity, Box, RefreshCw, Square, User, Sliders, Sparkles, Camera } from 'lucide-react';
 import { DebugConfig } from '../types';
 
 interface DebugMenuProps {
@@ -21,7 +21,7 @@ const DebugMenu: React.FC<DebugMenuProps> = ({ config, onConfigChange, onRecalib
   };
 
   return (
-    <div className="absolute top-4 left-4 z-50 flex flex-col items-start gap-2">
+    <div className="absolute top-4 left-4 z-[60] flex flex-col items-start gap-2">
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="p-2 bg-gray-900/80 border border-gray-700 rounded text-white hover:bg-gray-800 hover:text-[#00f3ff] transition-colors"
@@ -30,7 +30,7 @@ const DebugMenu: React.FC<DebugMenuProps> = ({ config, onConfigChange, onRecalib
       </button>
 
       {isOpen && (
-        <div className="p-4 bg-gray-900/95 border border-gray-700 rounded-lg backdrop-blur-md shadow-xl w-72 space-y-4 animate-fade-in-down h-[80vh] overflow-y-auto">
+        <div className="p-4 bg-gray-900/95 border border-gray-700 rounded-lg backdrop-blur-md shadow-xl w-72 space-y-4 animate-fade-in-down max-h-[80vh] overflow-y-auto">
             <h3 className="text-xs font-mono uppercase text-gray-500 tracking-widest mb-2">Game Settings</h3>
 
             <button 
@@ -39,6 +39,22 @@ const DebugMenu: React.FC<DebugMenuProps> = ({ config, onConfigChange, onRecalib
             >
                 <span className="flex items-center gap-2"><User size={14} /> Avatar Visibility</span>
                 <span className="text-[10px] font-mono">{config.showAvatar ? 'VISIBLE' : 'HIDDEN'}</span>
+            </button>
+
+            <button 
+                onClick={() => toggle('showTrail')}
+                className={`flex items-center justify-between w-full p-2 rounded text-sm ${config.showTrail ? 'bg-[#00f3ff]/20 text-[#00f3ff]' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+                <span className="flex items-center gap-2"><Sparkles size={14} /> Saber Trail</span>
+                <span className="text-[10px] font-mono">{config.showTrail ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <button 
+                onClick={() => toggle('showCameraPreview')}
+                className={`flex items-center justify-between w-full p-2 rounded text-sm ${config.showCameraPreview ? 'bg-orange-500/20 text-orange-400' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+                <span className="flex items-center gap-2"><Camera size={14} /> Camera Preview</span>
+                <span className="text-[10px] font-mono">{config.showCameraPreview ? 'ON' : 'OFF'}</span>
             </button>
 
             <div className="space-y-1 p-2 bg-white/5 rounded">
