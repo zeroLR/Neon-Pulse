@@ -7,6 +7,30 @@ import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig }
 import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
 import DebugMenu from './DebugMenu';
+import { useAudio, useGameState } from '../hooks';
+import { 
+  createBlockMesh, 
+  createSaberMesh, 
+  createTrailMesh, 
+  updateTrail as updateTrailUtil,
+  createAvatarMesh,
+  mapTo3D as mapTo3DUtil,
+  TRAIL_LENGTH 
+} from '../utils/threeHelpers';
+import { 
+  getSaberBladePoints, 
+  checkBlockCollision as checkBlockCollisionUtil 
+} from '../utils/collision';
+import { 
+  createExplosion as createExplosionUtil,
+  createSlashEffect as createSlashEffectUtil,
+  createDebris as createDebrisUtil,
+  updateParticles,
+  updateShockwaves,
+  updateSlashEffects,
+  updateDebris,
+  EffectRefs
+} from '../utils/effects';
 
 interface GameCanvasProps {
   onGameOver: (score: number) => void;
@@ -15,8 +39,6 @@ interface GameCanvasProps {
   onCalibrationComplete: () => void;
   onRecalibrateRequest: () => void;
 }
-
-const TRAIL_LENGTH = 20;
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
     onGameOver, 
@@ -69,38 +91,30 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Debug Visuals Group
   const debugGroupRef = useRef<THREE.Group | null>(null);
 
-  // --- Game State ---
-  const blocks = useRef<any[]>([]); // Using any to allow adding startPos dynamically
-  const stats = useRef<GameStats>({ score: 0, combo: 0, maxCombo: 0, health: 100 });
+  // --- Game State (using custom hook) ---
+  const gameState = useGameState();
+  const { 
+    stats, 
+    isPaused, 
+    setIsPaused, 
+    countdown, 
+    isGameActive, 
+    startCountdown,
+    currentMeasure, 
+    currentBeat,
+    debugConfig, 
+    setDebugConfig, 
+    isDebugOpen, 
+    setIsDebugOpen 
+  } = gameState;
+  
+  // Block management (kept here as it involves Three.js objects)
+  const blocks = useRef<any[]>([]);
   const lastTime = useRef<number>(0);
   const nextSpawnTime = useRef<number>(0);
-  const [isPaused, setIsPaused] = useState(false);
-  
-  // Beatmap tracking
-  const currentMeasure = useRef<number>(0);
-  const currentBeat = useRef<number>(0);
   
   // Use Ref for visual-only state to avoid re-renders resetting the game loop
   const nextTrackFlash = useRef<number[] | null>(null);
-  
-  // Countdown State
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const isGameActive = useRef(false);
-  const countdownTimer = useRef<any>(null);
-
-  // Debug Configuration
-  const [debugConfig, setDebugConfig] = useState<DebugConfig>({
-      godMode: false,
-      showNodes: false,
-      showHitboxes: false,
-      showBlockHitboxes: false,
-      saberScale: GAME_CONFIG.DEFAULT_SABER_SCALE,
-      blockScale: 1.0,
-      showAvatar: false,
-      showTrail: GAME_CONFIG.DEFAULT_SHOW_TRAIL,
-      showCameraPreview: GAME_CONFIG.DEFAULT_SHOW_CAMERA_PREVIEW
-  });
-  const [isDebugOpen, setIsDebugOpen] = useState(false);
   
   // Camera preview canvas ref
   const cameraPreviewRef = useRef<HTMLCanvasElement>(null);
@@ -123,301 +137,35 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const leftVelVector = useRef<THREE.Vector3>(new THREE.Vector3());
   const rightVelVector = useRef<THREE.Vector3>(new THREE.Vector3());
 
-  // Audio
-  const audioContext = useRef<AudioContext | null>(null);
-  const noiseBuffer = useRef<AudioBuffer | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
+  // Audio (using custom hook)
+  const audio = useAudio();
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
   // --- Initialization ---
 
-  const createBlockMesh = (type: BlockType): THREE.Group => {
-    const group = new THREE.Group();
-    const size = GAME_CONFIG.BLOCK_SIZE; // Use new larger size
-    
-    // Geometry
-    const geometry = new THREE.BoxGeometry(size, size, size);
-    const edges = new THREE.EdgesGeometry(geometry);
-    
-    // Add lineDistance attribute for dashed material to work on EdgesGeometry segments
-    const lineDistances = new Float32Array(edges.attributes.position.count);
-    for (let i = 0; i < lineDistances.length; i += 2) {
-        lineDistances[i] = 0;
-        lineDistances[i + 1] = size;
-    }
-    edges.setAttribute('lineDistance', new THREE.BufferAttribute(lineDistances, 1));
+  // createBlockMesh is now imported from utils/threeHelpers
 
-    // Color
-    let color = GAME_CONFIG.COLORS.WHITE;
-    if (type === 'left') color = GAME_CONFIG.COLORS.CYAN;
-    if (type === 'right') color = GAME_CONFIG.COLORS.MAGENTA;
+  // createSaberMesh is now imported from utils/threeHelpers
 
-    // 1. Wireframe (The Neon Outline - White, filling effect)
-    const lineMaterial = new THREE.LineDashedMaterial({ 
-        color: 0xffffff, // White
-        linewidth: 3, // Increased visibility
-        transparent: true, 
-        opacity: 1.0, // Start fully opaque (but dashSize=0 makes it invisible initially)
-        dashSize: 0, // Starts empty
-        gapSize: size, // Full gap
-        scale: 1.5 
-    });
-    const wireframe = new THREE.LineSegments(edges, lineMaterial);
-    wireframe.name = 'wireframe';
-    // Slightly scale up wireframe to prevent Z-fighting and add "thickness" feel
-    wireframe.scale.setScalar(1.01); 
-    group.add(wireframe);
+  // createTrailMesh is now imported from utils/threeHelpers
 
-    // 2. Inner Glow
-    const innerMaterial = new THREE.MeshBasicMaterial({ 
-      color: color, 
-      transparent: true, 
-      opacity: 0.1, // Start dim
-      side: THREE.DoubleSide
-    });
-    const core = new THREE.Mesh(geometry, innerMaterial);
-    core.name = 'core';
-    group.add(core);
-
-    // 4. Collision Hitbox (Invisible/Debug)
-    // Multiplier 1.1x as requested
-    const hbSize = size * 1.1;
-    const hbGeo = new THREE.BoxGeometry(hbSize, hbSize, hbSize);
-    const hbMat = new THREE.MeshBasicMaterial({ 
-        color: 0x00ff00, 
-        wireframe: true,
-        transparent: true,
-        opacity: 0.5
-    });
-    const hitbox = new THREE.Mesh(hbGeo, hbMat);
-    hitbox.name = 'hitbox';
-    hitbox.visible = false; 
-    group.add(hitbox);
-
-    // Apply scale from config
-    group.scale.setScalar(debugConfig.blockScale);
-
-    return group;
-  };
-
-  const createSaberMesh = (color: number): THREE.Group => {
-    const group = new THREE.Group();
-    
-    // Handle
-    const handleGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.3, 16);
-    handleGeo.rotateX(Math.PI / 2); 
-    handleGeo.translate(0, 0, 0.15); // Origin at base
-    const handleMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.4, metalness: 0.8 });
-    const handle = new THREE.Mesh(handleGeo, handleMat);
-    group.add(handle);
-
-    // Blade
-    const bladeLength = 4.0; // Longer blade for 3D reach
-    const bladeGeo = new THREE.CylinderGeometry(0.04, 0.04, bladeLength, 16);
-    bladeGeo.rotateX(Math.PI / 2);
-    bladeGeo.translate(0, 0, 0.3 + bladeLength / 2);
-    const bladeMat = new THREE.MeshStandardMaterial({ 
-      color: color, 
-      emissive: color, 
-      emissiveIntensity: 3.0,
-      roughness: 0.0,
-      transparent: true,
-      opacity: 0.9
-    });
-    const blade = new THREE.Mesh(bladeGeo, bladeMat);
-    group.add(blade);
-    
-    // Hitbox (Physical Collider)
-    const { WIDTH, HEIGHT, LENGTH, OFFSET_Z } = GAME_CONFIG.SABER_HITBOX_CONFIG;
-    // Create Box centered at origin
-    const hitboxGeo = new THREE.BoxGeometry(WIDTH, HEIGHT, LENGTH);
-    
-    const hitboxMat = new THREE.MeshBasicMaterial({ 
-        color: color, 
-        wireframe: true,
-    });
-    const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
-    hitbox.name = 'hitbox';
-    // Offset using position instead of geometry translate for better matrix handling
-    hitbox.position.set(0, 0, OFFSET_Z);
-    hitbox.visible = false;
-    hitbox.scale.setScalar(1.25); // 1.25x Multiplier as requested
-    group.add(hitbox);
-
-    return group;
-  };
-
-  const createTrailMesh = (color: number) => {
-    // Triangle strip geometry
-    // 2 vertices per segment position (Base, Tip)
-    const vertexCount = TRAIL_LENGTH * 2;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(vertexCount * 3);
-    const alphas = new Float32Array(vertexCount);
-    
-    // Initialize indices for triangle strip
-    const indices = [];
-    for (let i = 0; i < TRAIL_LENGTH - 1; i++) {
-        const v = i * 2;
-        indices.push(v, v + 1, v + 2);
-        indices.push(v + 2, v + 1, v + 3);
-    }
-    geometry.setIndex(indices);
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
-
-    const material = new THREE.ShaderMaterial({
-        uniforms: {
-            color: { value: new THREE.Color(color) }
-        },
-        vertexShader: `
-            attribute float alpha;
-            varying float vAlpha;
-            void main() {
-                vAlpha = alpha;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
-        fragmentShader: `
-            uniform vec3 color;
-            varying float vAlpha;
-            void main() {
-                gl_FragColor = vec4(color, vAlpha);
-            }
-        `,
-        transparent: true,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.frustumCulled = false;
-    return mesh;
-  };
-
+  // Wrapper for updateTrail to use refs
   const updateTrail = (
       mesh: THREE.Mesh | null, 
       history: React.MutableRefObject<{base: THREE.Vector3, tip: THREE.Vector3}[]>,
       saberGroup: THREE.Group | null,
       saberScale: number
   ) => {
-      if (!mesh || !saberGroup) return;
-
-      // Calculate current Base and Tip in World Space
-      // Base = Group Position
-      const base = saberGroup.position.clone();
-      
-      // Tip = Group Position + (Forward Vector * Blade Length * Scale)
-      // Saber points along +Z locally? createSaberMesh rotates cylinder.
-      const bladeLength = 4.0 * saberScale;
-      const tip = base.clone().add(new THREE.Vector3(0, 0, bladeLength).applyQuaternion(saberGroup.quaternion));
-
-      // Update History
-      history.current.unshift({ base, tip });
-      if (history.current.length > TRAIL_LENGTH) {
-          history.current.pop();
-      }
-
-      // Fill Geometry
-      const positions = mesh.geometry.attributes.position.array as Float32Array;
-      const alphas = mesh.geometry.attributes.alpha.array as Float32Array;
-
-      for (let i = 0; i < TRAIL_LENGTH; i++) {
-          const point = history.current[i] || history.current[history.current.length - 1]; // Fallback to last known
-          if (!point) continue;
-
-          // Vertex 1 (Base)
-          positions[i * 6 + 0] = point.base.x;
-          positions[i * 6 + 1] = point.base.y;
-          positions[i * 6 + 2] = point.base.z;
-
-          // Vertex 2 (Tip)
-          positions[i * 6 + 3] = point.tip.x;
-          positions[i * 6 + 4] = point.tip.y;
-          positions[i * 6 + 5] = point.tip.z;
-
-          // Alpha Fade (Newest = 1, Oldest = 0)
-          const alpha = 1.0 - (i / TRAIL_LENGTH);
-          alphas[i * 2] = alpha * 0.5; // Max opacity 0.5
-          alphas[i * 2 + 1] = alpha * 0.5;
-      }
-
-      mesh.geometry.attributes.position.needsUpdate = true;
-      mesh.geometry.attributes.alpha.needsUpdate = true;
+      updateTrailUtil(mesh, history.current, saberGroup, saberScale);
   };
 
-  const createAvatarMesh = () => {
-      const group = new THREE.Group();
-      const material = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2, transparent: true, opacity: 0.6 });
-      const blueMat = new THREE.LineBasicMaterial({ color: GAME_CONFIG.COLORS.CYAN, linewidth: 2 });
-      const redMat = new THREE.LineBasicMaterial({ color: GAME_CONFIG.COLORS.MAGENTA, linewidth: 2 });
-
-      // Head
-      const headGeo = new THREE.IcosahedronGeometry(0.8, 1);
-      const headMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.5 });
-      const head = new THREE.Mesh(headGeo, headMat);
-      group.add(head);
-
-      // Helper to create line
-      const createLine = (mat: THREE.Material, points = 2) => {
-          const geo = new THREE.BufferGeometry().setFromPoints(new Array(points).fill(new THREE.Vector3(0,0,0)));
-          const line = new THREE.Line(geo, mat);
-          group.add(line);
-          return line;
-      };
-
-      const spine = createLine(material);
-      const shoulders = createLine(material);
-      const hips = createLine(material);
-      const leftArm = createLine(blueMat, 3); // Shoulder -> Elbow -> Wrist
-      const rightArm = createLine(redMat, 3);
-
-      avatarParts.current = { head, spine, shoulders, hips, leftArm, rightArm };
-      
-      group.visible = false; // Default hidden
-      return group;
-  };
+  // createAvatarMesh is now imported from utils/threeHelpers
 
   /**
-   * Helper: Convert normalized 2D to 3D.
+   * Helper: Convert normalized 2D to 3D (wrapper for utility function).
    */
   const mapTo3D = (normX: number, normY: number, rawZ: number, forceCompute = false): THREE.Vector3 => {
-     let camera = cameraRef.current;
-     if (!camera && forceCompute) {
-        const width = window.innerWidth || 1280;
-        const height = window.innerHeight || 720;
-        const aspect = width / height;
-        camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
-        camera.position.set(0, 0, GAME_CONFIG.CAMERA_Z);
-     }
-     
-     if (!camera) return new THREE.Vector3(0, 0, 0);
-
-     // Z-Scale: Positive means MediaPipe -Z (Front) maps to Game -Z (Into Screen)
-     const zScale = 6.0; 
-     const zBias = 0; 
-     const safeZ = Number.isFinite(rawZ) ? rawZ : 0;
-     const z = (safeZ * zScale) + zBias;
-
-     const distance = camera.position.z - z;
-     const vFov = camera.fov * Math.PI / 180;
-     const height = 2 * Math.tan(vFov / 2) * distance;
-     
-     const aspect = Number.isFinite(camera.aspect) ? camera.aspect : GAME_CONFIG.ASPECT_RATIO;
-     const width = height * aspect;
-
-     const safeNormX = Number.isFinite(normX) ? normX : 0.5;
-     const safeNormY = Number.isFinite(normY) ? normY : 0.5;
-
-     const x = (safeNormX - 0.5) * width;
-     const y = -(safeNormY - 0.5) * height; 
-     
-     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-         return new THREE.Vector3(0, 0, 0);
-     }
-     
-     return new THREE.Vector3(x, y, z);
+     return mapTo3DUtil(normX, normY, rawZ, cameraRef.current, forceCompute);
   };
 
   const createTrackLines = (scene: THREE.Scene) => {
@@ -488,9 +236,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     scene.add(gridHelper);
 
     // Avatar
-    const avatar = createAvatarMesh();
-    scene.add(avatar);
-    avatarGroupRef.current = avatar;
+    const avatarResult = createAvatarMesh();
+    scene.add(avatarResult.group);
+    avatarGroupRef.current = avatarResult.group;
+    avatarParts.current = avatarResult.parts;
 
     // Sabers
     const lSaber = createSaberMesh(GAME_CONFIG.COLORS.CYAN);
@@ -538,28 +287,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // --- Logic Helpers ---
 
-  const startCountdown = useCallback(() => {
-    if (countdownTimer.current) clearInterval(countdownTimer.current);
-    isGameActive.current = false;
-    setCountdown(3);
-    
-    let count = 3;
-    countdownTimer.current = setInterval(() => {
-        count--;
-        if (count > 0) {
-            setCountdown(count);
-        } else {
-            setCountdown(null);
-            isGameActive.current = true;
-            lastTime.current = performance.now();
-            if (countdownTimer.current) clearInterval(countdownTimer.current);
-        }
-    }, 1000);
-  }, []);
-
   const initGame = useCallback(() => {
     blocks.current = [];
-    stats.current = { score: 0, combo: 0, maxCombo: 0, health: 100 };
+    gameState.resetStats();
     lastTime.current = performance.now();
     nextSpawnTime.current = performance.now() + 2000;
     setIsPaused(false);
@@ -586,267 +316,32 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     startCountdown();
   }, [startCountdown]);
 
-  // Initialize Noise Buffer for Slash Sound - runs when audioContext is ready
-  const initNoiseBuffer = useCallback(() => {
-      if (!audioContext.current || noiseBuffer.current) return;
-      const ctx = audioContext.current;
-      const bufferSize = ctx.sampleRate * 2.0; // 2 seconds
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-          data[i] = Math.random() * 2 - 1;
-      }
-      noiseBuffer.current = buffer;
-  }, []);
+  // Audio functions are now provided by useAudio hook
+  const playSlashSound = audio.playSlashSound;
+  const playSound = audio.playSound;
 
-  const playSlashSound = (pitchMod = 1.0) => {
-    // Ensure noise buffer is initialized
-    if (!noiseBuffer.current) initNoiseBuffer();
-    
-    if (isMuted || !audioContext.current || !noiseBuffer.current) return;
-    const ctx = audioContext.current;
-    const now = ctx.currentTime;
-    
-    // 1. Noise Layer (Sharp Whoosh/Slash)
-    const noise = ctx.createBufferSource();
-    noise.buffer = noiseBuffer.current;
-    
-    const highpassFilter = ctx.createBiquadFilter();
-    highpassFilter.type = 'highpass';
-    highpassFilter.frequency.value = 2000;
-    highpassFilter.Q.value = 0.5;
-    
-    const lowpassFilter = ctx.createBiquadFilter();
-    lowpassFilter.type = 'lowpass';
-    lowpassFilter.Q.value = 2;
-    
-    const noiseGain = ctx.createGain();
-    
-    noise.connect(highpassFilter);
-    highpassFilter.connect(lowpassFilter);
-    lowpassFilter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-    
-    // Sharp attack, quick decay for slash sound
-    lowpassFilter.frequency.setValueAtTime(6000 * pitchMod, now);
-    lowpassFilter.frequency.exponentialRampToValueAtTime(500, now + 0.15);
-    
-    noiseGain.gain.setValueAtTime(0, now);
-    noiseGain.gain.linearRampToValueAtTime(0.5, now + 0.01); // Sharp attack
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-    
-    noise.start(now);
-    noise.stop(now + 0.2);
+  // Helper to get effect refs
+  const getEffectRefs = (): EffectRefs => ({
+    particleMeshes: particleMeshes.current!,
+    debrisMeshes: debrisMeshes.current!,
+    shockwaveMeshes: shockwaveMeshes.current!,
+    slashEffects: slashEffects.current!,
+    camera: cameraRef.current
+  });
 
-    // 2. Mid-frequency "schwing" oscillator (saber energy sound)
-    const schwing = ctx.createOscillator();
-    schwing.type = 'sawtooth';
-    schwing.frequency.setValueAtTime(800 * pitchMod, now);
-    schwing.frequency.exponentialRampToValueAtTime(200 * pitchMod, now + 0.1);
-    
-    const schwingGain = ctx.createGain();
-    schwingGain.gain.setValueAtTime(0.15, now);
-    schwingGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-    
-    const schwingFilter = ctx.createBiquadFilter();
-    schwingFilter.type = 'bandpass';
-    schwingFilter.frequency.value = 1000 * pitchMod;
-    schwingFilter.Q.value = 2;
-    
-    schwing.connect(schwingFilter);
-    schwingFilter.connect(schwingGain);
-    schwingGain.connect(ctx.destination);
-    
-    schwing.start(now);
-    schwing.stop(now + 0.12);
-
-    // 3. Low Impact (punch feel)
-    const impact = ctx.createOscillator();
-    impact.type = 'sine';
-    impact.frequency.setValueAtTime(120 * pitchMod, now);
-    impact.frequency.exponentialRampToValueAtTime(40, now + 0.08);
-    
-    const impactGain = ctx.createGain();
-    impactGain.gain.setValueAtTime(0.4, now);
-    impactGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-    
-    impact.connect(impactGain);
-    impactGain.connect(ctx.destination);
-    
-    impact.start(now);
-    impact.stop(now + 0.12);
-    
-    // 4. High "zing" for energy release
-    const zing = ctx.createOscillator();
-    zing.type = 'sine';
-    zing.frequency.setValueAtTime(2000 * pitchMod, now);
-    zing.frequency.exponentialRampToValueAtTime(800 * pitchMod, now + 0.08);
-    
-    const zingGain = ctx.createGain();
-    zingGain.gain.setValueAtTime(0.1, now);
-    zingGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-    
-    zing.connect(zingGain);
-    zingGain.connect(ctx.destination);
-    
-    zing.start(now);
-    zing.stop(now + 0.1);
-  };
-
-  const playSound = (freq: number, type: 'sine' | 'square' | 'sawtooth' | 'triangle', duration: number) => {
-    if (isMuted || !audioContext.current) return;
-    const osc = audioContext.current.createOscillator();
-    const gain = audioContext.current.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioContext.current.currentTime);
-    gain.gain.setValueAtTime(0.1, audioContext.current.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.current.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(audioContext.current.destination);
-    osc.start();
-    osc.stop(audioContext.current.currentTime + duration);
-  };
-
+  // Wrapper functions for effects
   const createExplosion = (pos: THREE.Vector3, color: number) => {
-    if (!particleMeshes.current) return;
-    
-    // 1. Particles
-    const count = 16;
-    const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-    const material = new THREE.MeshBasicMaterial({ color: color });
-
-    for (let i = 0; i < count; i++) {
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(pos);
-        
-        const velocity = new THREE.Vector3(
-            (Math.random() - 0.5) * 12,
-            (Math.random() - 0.5) * 12,
-            (Math.random() - 0.5) * 12
-        );
-        
-        mesh.userData = { velocity, life: 1.0 };
-        particleMeshes.current.add(mesh);
-    }
-
-    // 2. Shockwave (Expanding Ring)
-    if (shockwaveMeshes.current) {
-        const ringGeo = new THREE.RingGeometry(0.5, 0.8, 32);
-        const ringMat = new THREE.MeshBasicMaterial({ 
-            color: color, 
-            transparent: true, 
-            opacity: 0.8, 
-            side: THREE.DoubleSide 
-        });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.position.copy(pos);
-        if (cameraRef.current) ring.lookAt(cameraRef.current.position);
-        
-        ring.userData = { life: 0.5, maxScale: 4.0 };
-        shockwaveMeshes.current.add(ring);
-    }
+    createExplosionUtil(pos, color, getEffectRefs());
   };
 
   const createSlashEffect = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
-    if (!slashEffects.current) return;
-    
-    // Calculate slash angle from saber velocity
-    const angle = Math.atan2(saberVelocity.y, saberVelocity.x);
-    
-    // Create rounded diamond shape (smaller size)
-    const slashLength = GAME_CONFIG.BLOCK_SIZE * 1.5; // Half length
-    const slashWidth = 0.12; // Half width
-    const cornerRadius = 0.06; // Rounded corners
-    
-    // Create diamond shape with rounded corners using Shape
-    const shape = new THREE.Shape();
-    const hw = slashWidth; // half width
-    const hl = slashLength; // half length
-    const r = cornerRadius;
-    
-    // Draw rounded diamond: start from right point, go counter-clockwise
-    shape.moveTo(hl - r, 0);
-    shape.quadraticCurveTo(hl, 0, hl - r * 0.3, hw * 0.3); // right corner
-    shape.lineTo(r * 0.3, hw - r * 0.3);
-    shape.quadraticCurveTo(0, hw, -r * 0.3, hw - r * 0.3); // top corner
-    shape.lineTo(-hl + r * 0.3, hw * 0.3);
-    shape.quadraticCurveTo(-hl, 0, -hl + r * 0.3, -hw * 0.3); // left corner
-    shape.lineTo(-r * 0.3, -hw + r * 0.3);
-    shape.quadraticCurveTo(0, -hw, r * 0.3, -hw + r * 0.3); // bottom corner
-    shape.lineTo(hl - r * 0.3, -hw * 0.3);
-    shape.quadraticCurveTo(hl, 0, hl - r, 0); // back to right
-    
-    const geometry = new THREE.ShapeGeometry(shape);
-    
-    // Create gradient material with glow
-    const material = new THREE.MeshBasicMaterial({
-      color: color,
-      transparent: true,
-      opacity: 1.0,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    });
-    
-    const slash = new THREE.Mesh(geometry, material);
-    slash.position.copy(pos);
-    
-    // Face camera first, then apply slash angle
-    if (cameraRef.current) {
-      slash.lookAt(cameraRef.current.position);
-      slash.rotateZ(angle);
+    createSlashEffectUtil(pos, color, saberVelocity, getEffectRefs());
+  };
+
+  const createDebris = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
+    if (debrisMeshes.current) {
+      createDebrisUtil(pos, color, saberVelocity, debrisMeshes.current);
     }
-    
-    slash.userData = {
-      life: 0.35,
-      maxLife: 0.35,
-      initialScale: 1.0,
-      maxScale: 2.5,
-    };
-    
-    slashEffects.current.add(slash);
-    
-    // Create secondary glow slash (slightly larger, more transparent)
-    const glowShape = new THREE.Shape();
-    const ghw = slashWidth * 2; // glow half width
-    const ghl = slashLength * 1.1; // glow half length
-    const gr = cornerRadius * 1.5;
-    
-    glowShape.moveTo(ghl - gr, 0);
-    glowShape.quadraticCurveTo(ghl, 0, ghl - gr * 0.3, ghw * 0.3);
-    glowShape.lineTo(gr * 0.3, ghw - gr * 0.3);
-    glowShape.quadraticCurveTo(0, ghw, -gr * 0.3, ghw - gr * 0.3);
-    glowShape.lineTo(-ghl + gr * 0.3, ghw * 0.3);
-    glowShape.quadraticCurveTo(-ghl, 0, -ghl + gr * 0.3, -ghw * 0.3);
-    glowShape.lineTo(-gr * 0.3, -ghw + gr * 0.3);
-    glowShape.quadraticCurveTo(0, -ghw, gr * 0.3, -ghw + gr * 0.3);
-    glowShape.lineTo(ghl - gr * 0.3, -ghw * 0.3);
-    glowShape.quadraticCurveTo(ghl, 0, ghl - gr, 0);
-    
-    const glowGeometry = new THREE.ShapeGeometry(glowShape);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-    });
-    
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    glow.position.copy(pos);
-    
-    if (cameraRef.current) {
-      glow.lookAt(cameraRef.current.position);
-      glow.rotateZ(angle);
-    }
-    
-    glow.userData = {
-      life: 0.25,
-      maxLife: 0.25,
-      initialScale: 1.0,
-      maxScale: 3.0,
-    };
-    
-    slashEffects.current.add(glow);
   };
 
   const triggerImpact = (color: number) => {
@@ -862,48 +357,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       
       // 2. Camera Shake
       shakeIntensity.current = 0.4;
-  };
-
-  const createDebris = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
-      if (!debrisMeshes.current) return;
-
-      const halfSize = GAME_CONFIG.BLOCK_SIZE / 2;
-      const geometry = new THREE.BoxGeometry(GAME_CONFIG.BLOCK_SIZE, halfSize, GAME_CONFIG.BLOCK_SIZE);
-      const material = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.8 });
-      const edges = new THREE.EdgesGeometry(geometry);
-      const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
-
-      // Determine Cut Direction perpendicular to saber velocity
-      let separationDir = new THREE.Vector3(-saberVelocity.y, saberVelocity.x, 0).normalize();
-      if (separationDir.lengthSq() < 0.1) separationDir.set(0, 1, 0); 
-
-      // Create two halves
-      for (let i = -1; i <= 1; i += 2) {
-          const group = new THREE.Group();
-          const mesh = new THREE.Mesh(geometry, material);
-          const lines = new THREE.LineSegments(edges, lineMat);
-          group.add(mesh);
-          group.add(lines);
-
-          group.position.copy(pos);
-          
-          // Initial rotation to match cut angle
-          const angle = Math.atan2(saberVelocity.y, saberVelocity.x);
-          group.rotation.z = angle;
-
-          // Velocity: Fling apart
-          const force = GAME_CONFIG.DEBRIS_EXPLOSION_FORCE;
-          const vel = separationDir.clone().multiplyScalar(i * force);
-          vel.z = GAME_CONFIG.BLOCK_SPEED * 0.5; 
-          
-          group.userData = { 
-              velocity: vel, 
-              rotVel: new THREE.Vector3(Math.random(), Math.random(), Math.random()).multiplyScalar(5),
-              life: GAME_CONFIG.DEBRIS_LIFE 
-          };
-          
-          debrisMeshes.current.add(group);
-      }
   };
 
   const updateDebugVisuals = (
@@ -973,108 +426,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const prevLeftBladePoints = useRef<THREE.Vector3[]>([]);
   const prevRightBladePoints = useRef<THREE.Vector3[]>([]);
 
-  const getSaberBladePoints = (saberGroup: THREE.Group, saberScale: number = 1.0): THREE.Vector3[] => {
-      saberGroup.updateMatrixWorld(true);
-      const points: THREE.Vector3[] = [];
-      const startZ = 0;
-      const endZ = 4.5 * saberScale; // Blade length scaled
-      const bladeRadius = 0.15 * saberScale; // Blade thickness scaled
-      const steps = 12;
-      
-      for (let i = 0; i <= steps; i++) {
-          const t = i / steps;
-          const localZ = startZ + (t * (endZ - startZ));
-          
-          // Center point
-          const centerPoint = new THREE.Vector3(0, 0, localZ);
-          centerPoint.applyMatrix4(saberGroup.matrixWorld);
-          points.push(centerPoint);
-          
-          // Add points around the blade circumference for better collision detection
-          // This accounts for the blade's thickness when scaled up
-          const offsets = [
-              new THREE.Vector3(bladeRadius, 0, localZ),
-              new THREE.Vector3(-bladeRadius, 0, localZ),
-              new THREE.Vector3(0, bladeRadius, localZ),
-              new THREE.Vector3(0, -bladeRadius, localZ),
-          ];
-          
-          for (const offset of offsets) {
-              const point = offset.clone();
-              point.applyMatrix4(saberGroup.matrixWorld);
-              points.push(point);
-          }
-      }
-      return points;
-  };
-
-  const checkSaberIntersection = (saberGroup: THREE.Group, blockWorldPos: THREE.Vector3, prevBladePoints: THREE.Vector3[]) => {
-      // 1. Define Block AABB in World Space
-      // Use 1.1x scaling + Expansion for "Any Point" logic
-      const size = GAME_CONFIG.BLOCK_SIZE * debugConfig.blockScale * 1.1; 
-      const halfSize = size / 2;
-      
-      const min = new THREE.Vector3(blockWorldPos.x - halfSize, blockWorldPos.y - halfSize, blockWorldPos.z - halfSize);
-      const max = new THREE.Vector3(blockWorldPos.x + halfSize, blockWorldPos.y + halfSize, blockWorldPos.z + halfSize);
-      const blockBox = new THREE.Box3(min, max);
-
-      // Expand the block box to catch fast swings - scales with saber size
-      const expansionAmount = 0.5 * debugConfig.saberScale;
-      blockBox.expandByScalar(expansionAmount);
-
-      // 2. Get current blade points (scaled)
-      const currentBladePoints = getSaberBladePoints(saberGroup, debugConfig.saberScale);
-      
-      // 3. Check current frame collision
-      for (const point of currentBladePoints) {
-          if (blockBox.containsPoint(point)) {
-              return true;
-          }
-      }
-
-      // 4. Sweep Detection: Check interpolated positions between frames
-      // This catches fast swings that might skip over the block
-      if (prevBladePoints.length > 0) {
-          const interpSteps = 5; // Check 5 intermediate positions
-          for (let i = 0; i < currentBladePoints.length; i++) {
-              const currPoint = currentBladePoints[i];
-              const prevPoint = prevBladePoints[i] || currPoint;
-              
-              for (let s = 1; s <= interpSteps; s++) {
-                  const t = s / (interpSteps + 1);
-                  const interpPoint = new THREE.Vector3().lerpVectors(prevPoint, currPoint, t);
-                  
-                  if (blockBox.containsPoint(interpPoint)) {
-                      return true;
-                  }
-              }
-          }
-          
-          // 5. Triangle-based sweep collision for the blade surface
-          // Check if any triangle formed by consecutive blade edges intersects the box
-          for (let i = 0; i < currentBladePoints.length - 1; i++) {
-              const curr0 = currentBladePoints[i];
-              const curr1 = currentBladePoints[i + 1];
-              const prev0 = prevBladePoints[i] || curr0;
-              const prev1 = prevBladePoints[i + 1] || curr1;
-              
-              // Check center of the swept quad
-              const center = new THREE.Vector3()
-                  .add(curr0).add(curr1).add(prev0).add(prev1)
-                  .multiplyScalar(0.25);
-              
-              if (blockBox.containsPoint(center)) {
-                  return true;
-              }
-          }
-      }
-
-      return false;
-  };
-
-  const checkBlockCollision = (saberGroup: THREE.Group, blockWorldPos: THREE.Vector3, prevBladePoints: THREE.Vector3[]) => {
-      // Use Dense Point Sampling with Sweep Detection
-      return checkSaberIntersection(saberGroup, blockWorldPos, prevBladePoints);
+  // Wrapper for checkBlockCollision to use current debugConfig
+  const checkBlockCollision = (
+    saberGroup: THREE.Group, 
+    blockWorldPos: THREE.Vector3, 
+    prevBladePoints: THREE.Vector3[]
+  ) => {
+    return checkBlockCollisionUtil(
+      saberGroup, 
+      blockWorldPos, 
+      prevBladePoints,
+      debugConfig.blockScale,
+      debugConfig.saberScale
+    );
   };
 
   const updateAvatar = (lm: NormalizedLandmark[]) => {
@@ -1437,81 +801,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // --- Update Particles (Sparks) ---
     if (particleMeshes.current && !isPaused) {
-        for (let i = particleMeshes.current.children.length - 1; i >= 0; i--) {
-            const p = particleMeshes.current.children[i];
-            const u = p.userData as { velocity: THREE.Vector3, life: number };
-            
-            p.position.add(u.velocity.clone().multiplyScalar(dt));
-            u.life -= dt * 2.5; 
-            p.scale.setScalar(u.life);
-            
-            if (u.life <= 0) particleMeshes.current.remove(p);
-        }
+        updateParticles(particleMeshes.current, dt);
     }
 
     // --- Update Shockwaves ---
     if (shockwaveMeshes.current && !isPaused) {
-        for (let i = shockwaveMeshes.current.children.length - 1; i >= 0; i--) {
-            const s = shockwaveMeshes.current.children[i] as THREE.Mesh;
-            const u = s.userData as { life: number, maxScale: number };
-            const mat = s.material as THREE.MeshBasicMaterial;
-
-            // Expand
-            const scaleSpeed = u.maxScale * dt * 3;
-            s.scale.addScalar(scaleSpeed);
-            
-            // Fade
-            u.life -= dt * 3;
-            mat.opacity = u.life;
-            
-            if (u.life <= 0) shockwaveMeshes.current.remove(s);
-        }
+        updateShockwaves(shockwaveMeshes.current, dt);
     }
 
     // --- Update Slash Effects ---
     if (slashEffects.current && !isPaused) {
-        for (let i = slashEffects.current.children.length - 1; i >= 0; i--) {
-            const slash = slashEffects.current.children[i] as THREE.Mesh;
-            const u = slash.userData as { life: number, maxLife: number, initialScale: number, maxScale: number };
-            const mat = slash.material as THREE.MeshBasicMaterial;
-
-            // Animate: expand uniformly, fade out
-            u.life -= dt;
-            const progress = 1 - (u.life / u.maxLife);
-            
-            // Expand scale over time (ease out)
-            const easeProgress = 1 - Math.pow(1 - progress, 2);
-            const currentScale = u.initialScale + (u.maxScale - u.initialScale) * easeProgress;
-            slash.scale.setScalar(currentScale);
-            
-            // Fade out (faster at the end)
-            mat.opacity = Math.max(0, Math.pow(u.life / u.maxLife, 0.5));
-            
-            if (u.life <= 0) slashEffects.current.remove(slash);
-        }
+        updateSlashEffects(slashEffects.current, dt);
     }
 
     // --- Update Debris (Block Pieces) ---
     if (debrisMeshes.current && !isPaused) {
-        for (let i = debrisMeshes.current.children.length - 1; i >= 0; i--) {
-            const d = debrisMeshes.current.children[i] as THREE.Group;
-            const u = d.userData as { velocity: THREE.Vector3, rotVel: THREE.Vector3, life: number };
-            
-            // Physics
-            u.velocity.y -= GAME_CONFIG.GRAVITY * dt;
-            d.position.add(u.velocity.clone().multiplyScalar(dt));
-            
-            // Rotation
-            d.rotation.x += u.rotVel.x * dt;
-            d.rotation.y += u.rotVel.y * dt;
-            
-            // Fade out
-            u.life -= dt;
-            if (u.life <= 0) {
-                d.scale.multiplyScalar(0.9); // Shrink out
-                if (d.scale.x < 0.01) debrisMeshes.current.remove(d);
-            }
-        }
+        updateDebris(debrisMeshes.current, dt);
     }
     
     // --- Update Previous Blade Points for Sweep Detection (with scale) ---
@@ -1563,13 +868,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Effect for the render loop
   useEffect(() => {
     if (gameStatus === 'playing' || gameStatus === 'calibration') {
-        if (!audioContext.current) {
-            audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
-        if (audioContext.current?.state === 'suspended') audioContext.current.resume();
-        
-        // Initialize noise buffer for slash sounds
-        initNoiseBuffer();
+        // Initialize audio using hook
+        audio.initAudio();
 
         requestRef.current = requestAnimationFrame(renderLoop);
     } else {
@@ -1578,14 +878,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return () => {
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [gameStatus, renderLoop, initNoiseBuffer]);
-
-  // Cleanup Timer on unmount
-  useEffect(() => {
-      return () => {
-          if (countdownTimer.current) clearInterval(countdownTimer.current);
-      }
-  }, []);
+  }, [gameStatus, renderLoop, audio]);
 
   const onResults = useCallback((results: Results) => {
     if (results.poseLandmarks) {
@@ -1704,13 +997,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return () => poseService.current?.stop();
   }, []);
 
-  const toggleMute = () => {
-    setIsMuted(!isMuted);
-    if (audioContext.current) {
-        if (!isMuted) audioContext.current.suspend();
-        else audioContext.current.resume();
-    }
-  }
+  // Mute toggle now uses hook
+  const toggleMute = audio.toggleMute;
 
   // Handle Pause
   const handlePause = () => setIsPaused(true);
@@ -1817,7 +1105,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
        )}
 
       <button onClick={toggleMute} className="absolute top-4 right-4 z-50 text-white/50 hover:text-white transition-colors">
-        {isMuted ? <VolumeX /> : <Volume2 />}
+        {audio.isMuted ? <VolumeX /> : <Volume2 />}
       </button>
 
       {/* Camera Preview Window */}
