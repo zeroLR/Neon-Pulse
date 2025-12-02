@@ -586,9 +586,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     startCountdown();
   }, [startCountdown]);
 
-  // Initialize Noise Buffer for Slash Sound
-  useEffect(() => {
-      if (!audioContext.current) return;
+  // Initialize Noise Buffer for Slash Sound - runs when audioContext is ready
+  const initNoiseBuffer = useCallback(() => {
+      if (!audioContext.current || noiseBuffer.current) return;
       const ctx = audioContext.current;
       const bufferSize = ctx.sampleRate * 2.0; // 2 seconds
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -600,48 +600,97 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   }, []);
 
   const playSlashSound = (pitchMod = 1.0) => {
+    // Ensure noise buffer is initialized
+    if (!noiseBuffer.current) initNoiseBuffer();
+    
     if (isMuted || !audioContext.current || !noiseBuffer.current) return;
     const ctx = audioContext.current;
     const now = ctx.currentTime;
     
-    // 1. Noise Layer (Whoosh)
+    // 1. Noise Layer (Sharp Whoosh/Slash)
     const noise = ctx.createBufferSource();
     noise.buffer = noiseBuffer.current;
     
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.Q.value = 1;
+    const highpassFilter = ctx.createBiquadFilter();
+    highpassFilter.type = 'highpass';
+    highpassFilter.frequency.value = 2000;
+    highpassFilter.Q.value = 0.5;
     
-    const gain = ctx.createGain();
+    const lowpassFilter = ctx.createBiquadFilter();
+    lowpassFilter.type = 'lowpass';
+    lowpassFilter.Q.value = 2;
     
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
+    const noiseGain = ctx.createGain();
     
-    // Envelopes for Noise
-    filter.frequency.setValueAtTime(800 * pitchMod, now);
-    filter.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+    noise.connect(highpassFilter);
+    highpassFilter.connect(lowpassFilter);
+    lowpassFilter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
     
-    gain.gain.setValueAtTime(0.4, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    // Sharp attack, quick decay for slash sound
+    lowpassFilter.frequency.setValueAtTime(6000 * pitchMod, now);
+    lowpassFilter.frequency.exponentialRampToValueAtTime(500, now + 0.15);
+    
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.5, now + 0.01); // Sharp attack
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
     
     noise.start(now);
-    noise.stop(now + 0.3);
+    noise.stop(now + 0.2);
 
-    // 2. Oscillator Layer (Kick/Impact)
-    const osc = ctx.createOscillator();
-    osc.frequency.setValueAtTime(150 * pitchMod, now);
-    osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.15);
+    // 2. Mid-frequency "schwing" oscillator (saber energy sound)
+    const schwing = ctx.createOscillator();
+    schwing.type = 'sawtooth';
+    schwing.frequency.setValueAtTime(800 * pitchMod, now);
+    schwing.frequency.exponentialRampToValueAtTime(200 * pitchMod, now + 0.1);
     
-    const oscGain = ctx.createGain();
-    oscGain.gain.setValueAtTime(0.5, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    const schwingGain = ctx.createGain();
+    schwingGain.gain.setValueAtTime(0.15, now);
+    schwingGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
     
-    osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
+    const schwingFilter = ctx.createBiquadFilter();
+    schwingFilter.type = 'bandpass';
+    schwingFilter.frequency.value = 1000 * pitchMod;
+    schwingFilter.Q.value = 2;
     
-    osc.start(now);
-    osc.stop(now + 0.15);
+    schwing.connect(schwingFilter);
+    schwingFilter.connect(schwingGain);
+    schwingGain.connect(ctx.destination);
+    
+    schwing.start(now);
+    schwing.stop(now + 0.12);
+
+    // 3. Low Impact (punch feel)
+    const impact = ctx.createOscillator();
+    impact.type = 'sine';
+    impact.frequency.setValueAtTime(120 * pitchMod, now);
+    impact.frequency.exponentialRampToValueAtTime(40, now + 0.08);
+    
+    const impactGain = ctx.createGain();
+    impactGain.gain.setValueAtTime(0.4, now);
+    impactGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+    
+    impact.connect(impactGain);
+    impactGain.connect(ctx.destination);
+    
+    impact.start(now);
+    impact.stop(now + 0.12);
+    
+    // 4. High "zing" for energy release
+    const zing = ctx.createOscillator();
+    zing.type = 'sine';
+    zing.frequency.setValueAtTime(2000 * pitchMod, now);
+    zing.frequency.exponentialRampToValueAtTime(800 * pitchMod, now + 0.08);
+    
+    const zingGain = ctx.createGain();
+    zingGain.gain.setValueAtTime(0.1, now);
+    zingGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+    
+    zing.connect(zingGain);
+    zingGain.connect(ctx.destination);
+    
+    zing.start(now);
+    zing.stop(now + 0.1);
   };
 
   const playSound = (freq: number, type: 'sine' | 'square' | 'sawtooth' | 'triangle', duration: number) => {
@@ -1518,6 +1567,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         }
         if (audioContext.current?.state === 'suspended') audioContext.current.resume();
+        
+        // Initialize noise buffer for slash sounds
+        initNoiseBuffer();
 
         requestRef.current = requestAnimationFrame(renderLoop);
     } else {
@@ -1526,7 +1578,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return () => {
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [gameStatus, renderLoop]);
+  }, [gameStatus, renderLoop, initNoiseBuffer]);
 
   // Cleanup Timer on unmount
   useEffect(() => {
