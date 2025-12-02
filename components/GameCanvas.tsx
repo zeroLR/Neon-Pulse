@@ -162,34 +162,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
      return mapTo3DUtil(normX, normY, rawZ, cameraRef.current, forceCompute);
   };
 
-  const createTrackLines = (scene: THREE.Scene) => {
-      // Clear existing lines
-      trackLinesRef.current.forEach(line => scene.remove(line));
-      trackLinesRef.current = [];
-
-      TRACK_LAYOUT.forEach((track, index) => {
-          const target3D = mapTo3D(track.x, track.y, 0, true);
-          // Start position logic matching spawnBlock (spreadFactor 1.3 at SPAWN_Z)
-          const spreadFactor = 1.3;
-          // Calculate height/width at SPAWN_Z
-          // Approximate by scaling based on target
-          const startX = target3D.x * spreadFactor;
-          const startY = target3D.y * spreadFactor;
-          const startPos = new THREE.Vector3(startX, startY, GAME_CONFIG.SPAWN_Z);
-
-          const geometry = new THREE.BufferGeometry().setFromPoints([startPos, target3D]);
-          const material = new THREE.LineBasicMaterial({ 
-              color: GAME_CONFIG.COLORS.GRAY, 
-              transparent: true, 
-              opacity: 0.1, // Softer rails
-              linewidth: 1
-          });
-          const line = new THREE.Line(geometry, material);
-          scene.add(line);
-          trackLinesRef.current[index] = line;
-      });
-  };
-
   const initThree = () => {
     if (!containerRef.current) return;
     
@@ -219,9 +191,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const pointLight = new THREE.PointLight(0xffffff, 1, 100);
     pointLight.position.set(0, 10, 10);
     scene.add(pointLight);
-
-    // Tracks
-    createTrackLines(scene);
 
     // Grid (Floor) - Raised for TPS
     const gridHelper = new THREE.GridHelper(60, 60, 0x111111, 0x000000);
