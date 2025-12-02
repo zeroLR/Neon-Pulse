@@ -58,6 +58,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const poseService = useRef<PoseService | null>(null);
   const youtubePlayerRef = useRef<HTMLIFrameElement>(null);
 
+  // Calculate block speed based on BPM
+  // Block should travel from SPAWN_Z to HIT_Z (0) in exactly one beat
+  const travelDistance = Math.abs(GAME_CONFIG.SPAWN_Z - GAME_CONFIG.HIT_Z); // Distance to travel
+  const secondsPerBeat = 60 / beatmap.bpm; // Time per beat in seconds
+  const blockSpeed = travelDistance / secondsPerBeat; // Speed in units per second
+
   // --- Three.js Refs ---
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -630,8 +636,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         blocks.current.forEach(block => {
             if (block.hit || block.missed) return;
 
-            // Move Block (Rail Logic)
-            block.position.z += GAME_CONFIG.BLOCK_SPEED * dt;
+            // Move Block (Rail Logic) - Speed based on BPM
+            block.position.z += blockSpeed * dt;
             
             // Calculate progress (t) based on Z. 0 at Start, 1 at Target.
             // Start: SPAWN_Z (-50). Target: 0.
