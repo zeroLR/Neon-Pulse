@@ -327,3 +327,83 @@ export const mapTo3D = (
   
   return new THREE.Vector3(x, y, z);
 };
+
+/**
+ * Avatar parts type definition
+ */
+export interface AvatarParts {
+  head: THREE.Mesh;
+  spine: THREE.Line;
+  shoulders: THREE.Line;
+  leftArm: THREE.Line;
+  rightArm: THREE.Line;
+  hips: THREE.Line;
+}
+
+/**
+ * Avatar position data returned from updateAvatar
+ */
+export interface AvatarPositionData {
+  lWrist: THREE.Vector3;
+  rWrist: THREE.Vector3;
+  lElbow: THREE.Vector3;
+  rElbow: THREE.Vector3;
+  lPalm: THREE.Vector3;
+  rPalm: THREE.Vector3;
+}
+
+/**
+ * NormalizedLandmark type (simplified for this module)
+ */
+interface NormalizedLandmark {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Update avatar mesh based on pose landmarks
+ */
+export const updateAvatar = (
+  lm: NormalizedLandmark[],
+  avatarParts: AvatarParts | null,
+  camera: THREE.PerspectiveCamera | null
+): AvatarPositionData | null => {
+  if (!avatarParts) return null;
+  
+  const { head, spine, shoulders, hips, leftArm, rightArm } = avatarParts;
+  
+  const getPos = (idx: number) => mapTo3D(1 - lm[idx].x, lm[idx].y, lm[idx].z, camera);
+
+  const nose = getPos(0);
+  const lShoulder = getPos(11);
+  const rShoulder = getPos(12);
+  const lElbow = getPos(13);
+  const rElbow = getPos(14);
+  const lWrist = getPos(15);
+  const rWrist = getPos(16);
+  const lPalm = getPos(19);  // Left index finger base (palm center)
+  const rPalm = getPos(20);  // Right index finger base (palm center)
+  const lHip = getPos(23);
+  const rHip = getPos(24);
+
+  // Head
+  head.position.copy(nose);
+  
+  // Update Lines
+  const updateLine = (line: THREE.Line, points: THREE.Vector3[]) => {
+    line.geometry.setFromPoints(points);
+    line.geometry.attributes.position.needsUpdate = true;
+  };
+
+  const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
+  const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
+
+  updateLine(spine, [midShoulder, midHip]);
+  updateLine(shoulders, [lShoulder, rShoulder]);
+  updateLine(hips, [lHip, rHip]);
+  updateLine(leftArm, [lShoulder, lElbow, lWrist]);
+  updateLine(rightArm, [rShoulder, rElbow, rWrist]);
+
+  return { lWrist, rWrist, lElbow, rElbow, lPalm, rPalm };
+};

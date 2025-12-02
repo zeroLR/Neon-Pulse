@@ -7,7 +7,8 @@ import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig }
 import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
 import DebugMenu from './DebugMenu';
-import { useAudio, useGameState } from '../hooks';
+import { ScoreDisplay, ComboDisplay, HealthBar } from './HUD';
+import { useAudio, useGameState, useCameraPreview, useCalibration } from '../hooks';
 import { 
   createBlockMesh, 
   createSaberMesh, 
@@ -15,7 +16,9 @@ import {
   updateTrail as updateTrailUtil,
   createAvatarMesh,
   mapTo3D as mapTo3DUtil,
-  TRAIL_LENGTH 
+  updateAvatar as updateAvatarUtil,
+  TRAIL_LENGTH,
+  AvatarParts
 } from '../utils/threeHelpers';
 import { 
   getSaberBladePoints, 
@@ -79,14 +82,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   
   // Avatar Refs
   const avatarGroupRef = useRef<THREE.Group | null>(null);
-  const avatarParts = useRef<{
-      head: THREE.Mesh;
-      spine: THREE.Line;
-      shoulders: THREE.Line;
-      leftArm: THREE.Line;
-      rightArm: THREE.Line;
-      hips: THREE.Line;
-  } | null>(null);
+  const avatarParts = useRef<AvatarParts | null>(null);
 
   // Debug Visuals Group
   const debugGroupRef = useRef<THREE.Group | null>(null);
@@ -115,17 +111,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   
   // Use Ref for visual-only state to avoid re-renders resetting the game loop
   const nextTrackFlash = useRef<number[] | null>(null);
-  
-  // Camera preview canvas ref
-  const cameraPreviewRef = useRef<HTMLCanvasElement>(null);
-
-  // Calibration State
-  const [calibrationLeft, setCalibrationLeft] = useState(0);
-  const [calibrationRight, setCalibrationRight] = useState(0);
-  const [calibrationComplete, setCalibrationComplete] = useState(false);
 
   // Raw Landmarks (from MediaPipe)
   const rawLandmarks = useRef<NormalizedLandmark[] | null>(null);
+  
+  // Calibration (using custom hook)
+  const calibration = useCalibration(onCalibrationComplete);
+  
+  // Camera Preview (using custom hook)
+  const cameraPreview = useCameraPreview(videoRef, rawLandmarks, debugConfig.showCameraPreview);
 
   // Previous Frame 3D Positions (for velocity calc)
   const prevLeftPos = useRef<THREE.Vector3>(new THREE.Vector3());
@@ -396,35 +390,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       });
   };
 
-  const updateCalibration = (dt: number, landmarks: NormalizedLandmark[]) => {
-      const lw = landmarks[15];
-      const rw = landmarks[16];
-
-      // Mirroring Logic for Calibration
-      const tolerance = 0.15; 
-      const isLeftInZone = Math.abs(lw.x - 0.8) < tolerance && Math.abs(lw.y - 0.5) < tolerance;
-      const isRightInZone = Math.abs(rw.x - 0.2) < tolerance && Math.abs(rw.y - 0.5) < tolerance;
-
-      if (isLeftInZone) setCalibrationLeft(prev => Math.min(100, prev + dt * 100));
-      else setCalibrationLeft(prev => Math.max(0, prev - dt * 200));
-
-      if (isRightInZone) setCalibrationRight(prev => Math.min(100, prev + dt * 100));
-      else setCalibrationRight(prev => Math.max(0, prev - dt * 200));
-
-      if (calibrationLeft >= 100 && calibrationRight >= 100 && !calibrationComplete) {
-          setCalibrationComplete(true);
-          setTimeout(() => {
-              setCalibrationLeft(0);
-              setCalibrationRight(0);
-              setCalibrationComplete(false);
-              onCalibrationComplete();
-          }, 1500);
-      }
-  };
-
   // Store previous frame's saber blade points for sweep detection
   const prevLeftBladePoints = useRef<THREE.Vector3[]>([]);
-  const prevRightBladePoints = useRef<THREE.Vector3[]>([]);
+  const prevRightBladePoints = useRef<THREE.Vector3[]>();
 
   // Wrapper for checkBlockCollision to use current debugConfig
   const checkBlockCollision = (
@@ -441,44 +409,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     );
   };
 
+  // Wrapper for updateAvatar to use refs
   const updateAvatar = (lm: NormalizedLandmark[]) => {
-      if (!avatarParts.current) return;
-      
-      const { head, spine, shoulders, hips, leftArm, rightArm } = avatarParts.current;
-      
-      const getPos = (idx: number) => mapTo3D(1 - lm[idx].x, lm[idx].y, lm[idx].z);
-
-      const nose = getPos(0);
-      const lShoulder = getPos(11);
-      const rShoulder = getPos(12);
-      const lElbow = getPos(13);
-      const rElbow = getPos(14);
-      const lWrist = getPos(15);
-      const rWrist = getPos(16);
-      const lPalm = getPos(19);  // Left index finger base (palm center)
-      const rPalm = getPos(20);  // Right index finger base (palm center)
-      const lHip = getPos(23);
-      const rHip = getPos(24);
-
-      // Head
-      head.position.copy(nose);
-      
-      // Update Lines
-      const updateLine = (line: THREE.Line, points: THREE.Vector3[]) => {
-          line.geometry.setFromPoints(points);
-          line.geometry.attributes.position.needsUpdate = true;
-      };
-
-      const midShoulder = new THREE.Vector3().addVectors(lShoulder, rShoulder).multiplyScalar(0.5);
-      const midHip = new THREE.Vector3().addVectors(lHip, rHip).multiplyScalar(0.5);
-
-      updateLine(spine, [midShoulder, midHip]);
-      updateLine(shoulders, [lShoulder, rShoulder]);
-      updateLine(hips, [lHip, rHip]);
-      updateLine(leftArm, [lShoulder, lElbow, lWrist]);
-      updateLine(rightArm, [rShoulder, rElbow, rWrist]);
-
-      return { lWrist, rWrist, lElbow, rElbow, lPalm, rPalm };
+    return updateAvatarUtil(lm, avatarParts.current, cameraRef.current);
   };
 
   // --- Main Loop ---
@@ -655,7 +588,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         updateDebugVisuals(currentLeftPos, currentRightPos, currentLeftPos, currentRightPos);
         
         if (gameStatus === 'calibration') {
-            updateCalibration(dt, lm);
+            calibration.updateCalibration(dt, lm);
         }
     }
 
@@ -834,7 +767,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         rendererRef.current.render(sceneRef.current, cameraRef.current);
     }
     requestRef.current = requestAnimationFrame(renderLoop);
-  }, [gameStatus, debugConfig, calibrationLeft, calibrationRight, isPaused]); 
+  }, [gameStatus, debugConfig, calibration.calibrationLeft, calibration.calibrationRight, isPaused]); 
 
   // --- Effects ---
 
@@ -885,98 +818,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         rawLandmarks.current = results.poseLandmarks;
     }
   }, []);
-
-  // Camera preview render loop
-  const cameraPreviewAnimationRef = useRef<number | null>(null);
-  
-  const drawCameraPreview = useCallback(() => {
-    if (cameraPreviewRef.current && videoRef.current && debugConfig.showCameraPreview) {
-        const canvas = cameraPreviewRef.current;
-        const ctx = canvas.getContext('2d');
-        const video = videoRef.current;
-        
-        if (ctx && video.readyState >= 2) {
-            // Draw video frame (mirrored)
-            ctx.save();
-            ctx.scale(-1, 1);
-            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-            ctx.restore();
-            
-            // Draw pose landmarks for wrists and palms
-            if (rawLandmarks.current) {
-                const lm = rawLandmarks.current;
-                const leftWrist = lm[15];  // Left wrist
-                const rightWrist = lm[16]; // Right wrist
-                const leftPalm = lm[19];   // Left index finger base (palm center)
-                const rightPalm = lm[20];  // Right index finger base (palm center)
-                
-                const drawPoint = (landmark: NormalizedLandmark, color: string, size: number = 8) => {
-                    // Mirror X coordinate
-                    const x = (1 - landmark.x) * canvas.width;
-                    const y = landmark.y * canvas.height;
-                    
-                    ctx.beginPath();
-                    ctx.arc(x, y, size, 0, Math.PI * 2);
-                    ctx.fillStyle = color;
-                    ctx.fill();
-                    
-                    // Glow effect
-                    ctx.beginPath();
-                    ctx.arc(x, y, size + 4, 0, Math.PI * 2);
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                };
-                
-                const drawLine = (from: NormalizedLandmark, to: NormalizedLandmark, color: string) => {
-                    const x1 = (1 - from.x) * canvas.width;
-                    const y1 = from.y * canvas.height;
-                    const x2 = (1 - to.x) * canvas.width;
-                    const y2 = to.y * canvas.height;
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(x1, y1);
-                    ctx.lineTo(x2, y2);
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                };
-                
-                // Draw wrist to palm lines (saber direction)
-                drawLine(leftWrist, leftPalm, '#00f3ff');
-                drawLine(rightWrist, rightPalm, '#ff00ff');
-                
-                // Draw points - wrists smaller, palms larger (palm is saber tip direction)
-                drawPoint(leftWrist, '#00f3ff', 6);
-                drawPoint(rightWrist, '#ff00ff', 6);
-                drawPoint(leftPalm, '#00f3ff', 10);
-                drawPoint(rightPalm, '#ff00ff', 10);
-            }
-        }
-    }
-    
-    if (debugConfig.showCameraPreview) {
-        cameraPreviewAnimationRef.current = requestAnimationFrame(drawCameraPreview);
-    }
-  }, [debugConfig.showCameraPreview]);
-
-  // Effect to manage camera preview animation
-  useEffect(() => {
-    if (debugConfig.showCameraPreview) {
-        cameraPreviewAnimationRef.current = requestAnimationFrame(drawCameraPreview);
-    } else {
-        if (cameraPreviewAnimationRef.current) {
-            cancelAnimationFrame(cameraPreviewAnimationRef.current);
-            cameraPreviewAnimationRef.current = null;
-        }
-    }
-    
-    return () => {
-        if (cameraPreviewAnimationRef.current) {
-            cancelAnimationFrame(cameraPreviewAnimationRef.current);
-        }
-    };
-  }, [debugConfig.showCameraPreview, drawCameraPreview]);
 
   useEffect(() => {
     const startPose = async () => {
@@ -1034,9 +875,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       {/* Calibration Overlay */}
       {gameStatus === 'calibration' && (
           <CalibrationOverlay 
-            leftProgress={calibrationLeft}
-            rightProgress={calibrationRight}
-            isComplete={calibrationComplete}
+            leftProgress={calibration.calibrationLeft}
+            rightProgress={calibration.calibrationRight}
+            isComplete={calibration.calibrationComplete}
           />
       )}
 
@@ -1113,7 +954,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           <div className="absolute bottom-4 right-4 z-40 rounded-lg overflow-hidden border-2 border-gray-700 shadow-xl bg-black">
               <div className="relative">
                   <canvas 
-                      ref={cameraPreviewRef}
+                      ref={cameraPreview.cameraPreviewRef}
                       width={240}
                       height={180}
                       className="block"
@@ -1139,29 +980,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       )}
     </div>
   );
-};
-
-const ScoreDisplay = ({ statsRef }: { statsRef: React.MutableRefObject<GameStats> }) => {
-    const [val, setVal] = useState(0);
-    useEffect(() => { const i = setInterval(() => setVal(statsRef.current.score), 100); return () => clearInterval(i); }, [statsRef]);
-    return <>{val.toLocaleString()}</>;
-};
-
-const ComboDisplay = ({ statsRef }: { statsRef: React.MutableRefObject<GameStats> }) => {
-    const [val, setVal] = useState(0);
-    useEffect(() => { const i = setInterval(() => setVal(statsRef.current.combo), 100); return () => clearInterval(i); }, [statsRef]);
-    return <>{val}x</>;
-};
-
-const HealthBar = ({ statsRef }: { statsRef: React.MutableRefObject<GameStats> }) => {
-    const [hp, setHp] = useState(100);
-    useEffect(() => { const i = setInterval(() => setHp(statsRef.current.health), 100); return () => clearInterval(i); }, [statsRef]);
-    return (
-        <div 
-            className="h-full bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] shadow-[0_0_10px_#ff00ff] transition-all duration-200"
-            style={{ width: `${hp}%` }}
-        />
-    );
 };
 
 export default GameCanvas;
