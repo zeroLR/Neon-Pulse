@@ -119,6 +119,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const nextSpawnTime = useRef<number>(0);
   const beatmapCompleted = useRef<boolean>(false);
   const gameOverDelayTimer = useRef<number | null>(null);
+  const spawnedBeatIndex = useRef<number>(0); // Track which beats have been spawned
   
   // Use Ref for visual-only state to avoid re-renders resetting the game loop
   const nextTrackFlash = useRef<number[] | null>(null);
@@ -181,6 +182,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Scene
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a12); // Dark blue-ish background
+    scene.fog = new THREE.Fog(0x0a0a12, 50, 400); // Fog for depth effect
     sceneRef.current = scene;
 
     // Camera
@@ -420,7 +423,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // --- Main Loop ---
 
   // Spawn a single block from a BlockNote
-  const spawnSingleBlock = (note: BlockNote, time: number) => {
+  // beatsAhead: how many beats in the future this block should arrive (0 = next beat)
+  const spawnSingleBlock = (note: BlockNote, time: number, beatsAhead: number = 0) => {
     const trackIndex = getTrackIndexByLabel(note.track);
     const target = TRACK_LAYOUT[trackIndex];
     const type = note.color!; // Already parsed with default
@@ -432,10 +436,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Calculate 3D Target (at Z=0)
     const target3D = mapTo3D(target.x, target.y, 0, true);
     
-    // Calculate 3D Start (at SPAWN_Z)
+    // Calculate spawn Z based on how far ahead this block is
+    // Each beat ahead = one more beat of travel distance
+    const extraDistance = beatsAhead * travelDistance;
+    const spawnZ = GAME_CONFIG.SPAWN_Z - extraDistance;
+    
+    // Calculate 3D Start position
     const startX = target3D.x * GAME_CONFIG.SPAWN.SPREAD_FACTOR;
     const startY = target3D.y * GAME_CONFIG.SPAWN.SPREAD_FACTOR;
-    const startPos = new THREE.Vector3(startX, startY, GAME_CONFIG.SPAWN_Z);
+    const startPos = new THREE.Vector3(startX, startY, spawnZ);
 
     mesh.position.copy(startPos);
     
@@ -459,59 +468,81 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return trackIndex;
   };
 
+  // Helper to get beat data at a specific global beat index
+  const getBeatDataAtIndex = (globalBeatIndex: number): BeatData | null => {
+    let beatIdx = globalBeatIndex;
+    for (let m = 0; m < beatmap.data.length; m++) {
+      const measure = beatmap.data[m];
+      if (beatIdx < measure.length) {
+        return measure[beatIdx];
+      }
+      beatIdx -= measure.length;
+    }
+    return null; // Past end of beatmap
+  };
+
+  // Get total beats in beatmap
+  const getTotalBeats = (): number => {
+    return beatmap.data.reduce((sum, measure) => sum + measure.length, 0);
+  };
+
   const spawnBlock = (time: number) => {
     if (time < nextSpawnTime.current) return;
-    if (beatmapCompleted.current) return; // Stop spawning if beatmap completed
+    if (beatmapCompleted.current) return;
     
     const beatInterval = 60000 / beatmap.bpm;
-    nextSpawnTime.current = time + beatInterval;
-
-    // Get current beat from beatmap
-    const measure = beatmap.data[currentMeasure.current];
-    if (!measure) {
-      // Beatmap ended - mark as completed, but wait for blocks to clear
-      beatmapCompleted.current = true;
-      return;
-    }
+    const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
+    const totalBeats = getTotalBeats();
     
-    const beatData = measure[currentBeat.current];
+    // Calculate which beat should be hitting now
+    const gameTime = time - GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    const currentBeatIndex = Math.floor(gameTime / beatInterval);
     
-    // Advance to next beat
-    currentBeat.current++;
-    if (currentBeat.current >= measure.length) {
-      currentBeat.current = 0;
-      currentMeasure.current++;
-      // Check if beatmap ended
-      if (currentMeasure.current >= beatmap.data.length) {
-        // Let the last blocks finish before triggering game over
-        // We'll trigger it on next spawn attempt
+    // Spawn all beats up to lookahead ahead that haven't been spawned yet
+    const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
+    
+    while (spawnedBeatIndex.current <= targetSpawnIndex) {
+      const beatIndex = spawnedBeatIndex.current;
+      const beatData = getBeatDataAtIndex(beatIndex);
+      
+      if (beatData === null) {
+        // Check if we've reached the end
+        if (beatIndex >= totalBeats) {
+          beatmapCompleted.current = true;
+          break;
+        }
+        // Skip rest beats
+        spawnedBeatIndex.current++;
+        continue;
       }
-    }
-    
-    // Skip if null (rest)
-    if (beatData === null) return;
-    
-    const spawnedTracks: number[] = [];
-    
-    if (Array.isArray(beatData)) {
-      // Multiple simultaneous blocks
-      for (const item of beatData) {
-        const note = parseBeatNote(item);
-        const trackIdx = spawnSingleBlock(note, time);
+      
+      // Calculate how many beats ahead this block is from the current beat
+      const beatsAhead = beatIndex - currentBeatIndex;
+      
+      const spawnedTracks: number[] = [];
+      
+      if (Array.isArray(beatData)) {
+        for (const item of beatData) {
+          const note = parseBeatNote(item);
+          const trackIdx = spawnSingleBlock(note, time, beatsAhead);
+          spawnedTracks.push(trackIdx);
+        }
+      } else {
+        const note = parseBeatNote(beatData);
+        const trackIdx = spawnSingleBlock(note, time, beatsAhead);
         spawnedTracks.push(trackIdx);
       }
-    } else {
-      // Single block (string or BlockNote)
-      const note = parseBeatNote(beatData);
-      const trackIdx = spawnSingleBlock(note, time);
-      spawnedTracks.push(trackIdx);
+      
+      spawnedBeatIndex.current++;
     }
     
-    // Flash the spawned tracks
-    if (spawnedTracks.length > 0) {
-      nextTrackFlash.current = spawnedTracks;
-      setTimeout(() => { nextTrackFlash.current = null; }, GAME_CONFIG.SPAWN.TRACK_FLASH_DURATION);
+    // Check if beatmap is complete
+    if (spawnedBeatIndex.current >= totalBeats) {
+      beatmapCompleted.current = true;
     }
+    
+    // Update next spawn time
+    nextSpawnTime.current = time + beatInterval;
   };
 
   // Effect to sync settings with meshes

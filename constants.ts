@@ -6,7 +6,7 @@ export const GAME_CONFIG = {
   
   // 3D World Constants
   CAMERA_Z: 12, // Moved back for TPS
-  SPAWN_Z: -70, // Much deeper spawn for more immersion
+  SPAWN_Z: -50, // Much deeper spawn for more immersion
   HIT_Z: 0, 
   DESPAWN_Z: 10, 
   
@@ -14,19 +14,19 @@ export const GAME_CONFIG = {
   CAMERA: {
     FOV: 60,
     NEAR: 0.1,
-    FAR: 100,
+    FAR: 1000, // Extended to see lookahead blocks
     POSITION_Y: 2,
     LOOK_AT_Z: -20,
   },
   
   // Grid (Floor) Settings
   GRID: {
-    SIZE: 60,
-    DIVISIONS: 60,
+    SIZE: 200, // Extended for longer view
+    DIVISIONS: 100,
     POSITION_Y: -6,
-    POSITION_Z: -20,
-    COLOR_CENTER: 0x111111,
-    COLOR_GRID: 0x000000,
+    POSITION_Z: -80,
+    COLOR_CENTER: 0x333344, // Brighter center
+    COLOR_GRID: 0x111122, // Subtle grid lines
   },
   
   // Lighting
@@ -54,6 +54,7 @@ export const GAME_CONFIG = {
   SPAWN: {
     SPREAD_FACTOR: 1.3, // How much blocks spread out at spawn
     TRACK_FLASH_DURATION: 500, // ms
+    LOOKAHEAD_BEATS: 8, // How many beats ahead to spawn blocks
   },
   
   // Visuals & Hitbox
