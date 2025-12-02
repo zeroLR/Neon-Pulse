@@ -41,6 +41,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const particleMeshes = useRef<THREE.Group | null>(null);
   const debrisMeshes = useRef<THREE.Group | null>(null);
   const shockwaveMeshes = useRef<THREE.Group | null>(null); 
+  const slashEffects = useRef<THREE.Group | null>(null);
   const leftSaberRef = useRef<THREE.Group | null>(null);
   const rightSaberRef = useRef<THREE.Group | null>(null);
   const trackLinesRef = useRef<THREE.Line[]>([]);
@@ -524,6 +525,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     scene.add(sGroup);
     shockwaveMeshes.current = sGroup;
 
+    // Slash Effects Group
+    const slashGroup = new THREE.Group();
+    scene.add(slashGroup);
+    slashEffects.current = slashGroup;
+
     // Debug Group
     const debugGroup = new THREE.Group();
     scene.add(debugGroup);
@@ -574,6 +580,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         if (particleMeshes.current) particleMeshes.current.clear();
         if (debrisMeshes.current) debrisMeshes.current.clear();
         if (shockwaveMeshes.current) shockwaveMeshes.current.clear();
+        if (slashEffects.current) slashEffects.current.clear();
     }
 
     startCountdown();
@@ -689,6 +696,108 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ring.userData = { life: 0.5, maxScale: 4.0 };
         shockwaveMeshes.current.add(ring);
     }
+  };
+
+  const createSlashEffect = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
+    if (!slashEffects.current) return;
+    
+    // Calculate slash angle from saber velocity
+    const angle = Math.atan2(saberVelocity.y, saberVelocity.x);
+    
+    // Create rounded diamond shape (smaller size)
+    const slashLength = GAME_CONFIG.BLOCK_SIZE * 1.5; // Half length
+    const slashWidth = 0.12; // Half width
+    const cornerRadius = 0.06; // Rounded corners
+    
+    // Create diamond shape with rounded corners using Shape
+    const shape = new THREE.Shape();
+    const hw = slashWidth; // half width
+    const hl = slashLength; // half length
+    const r = cornerRadius;
+    
+    // Draw rounded diamond: start from right point, go counter-clockwise
+    shape.moveTo(hl - r, 0);
+    shape.quadraticCurveTo(hl, 0, hl - r * 0.3, hw * 0.3); // right corner
+    shape.lineTo(r * 0.3, hw - r * 0.3);
+    shape.quadraticCurveTo(0, hw, -r * 0.3, hw - r * 0.3); // top corner
+    shape.lineTo(-hl + r * 0.3, hw * 0.3);
+    shape.quadraticCurveTo(-hl, 0, -hl + r * 0.3, -hw * 0.3); // left corner
+    shape.lineTo(-r * 0.3, -hw + r * 0.3);
+    shape.quadraticCurveTo(0, -hw, r * 0.3, -hw + r * 0.3); // bottom corner
+    shape.lineTo(hl - r * 0.3, -hw * 0.3);
+    shape.quadraticCurveTo(hl, 0, hl - r, 0); // back to right
+    
+    const geometry = new THREE.ShapeGeometry(shape);
+    
+    // Create gradient material with glow
+    const material = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 1.0,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    
+    const slash = new THREE.Mesh(geometry, material);
+    slash.position.copy(pos);
+    
+    // Face camera first, then apply slash angle
+    if (cameraRef.current) {
+      slash.lookAt(cameraRef.current.position);
+      slash.rotateZ(angle);
+    }
+    
+    slash.userData = {
+      life: 0.35,
+      maxLife: 0.35,
+      initialScale: 1.0,
+      maxScale: 2.5,
+    };
+    
+    slashEffects.current.add(slash);
+    
+    // Create secondary glow slash (slightly larger, more transparent)
+    const glowShape = new THREE.Shape();
+    const ghw = slashWidth * 2; // glow half width
+    const ghl = slashLength * 1.1; // glow half length
+    const gr = cornerRadius * 1.5;
+    
+    glowShape.moveTo(ghl - gr, 0);
+    glowShape.quadraticCurveTo(ghl, 0, ghl - gr * 0.3, ghw * 0.3);
+    glowShape.lineTo(gr * 0.3, ghw - gr * 0.3);
+    glowShape.quadraticCurveTo(0, ghw, -gr * 0.3, ghw - gr * 0.3);
+    glowShape.lineTo(-ghl + gr * 0.3, ghw * 0.3);
+    glowShape.quadraticCurveTo(-ghl, 0, -ghl + gr * 0.3, -ghw * 0.3);
+    glowShape.lineTo(-gr * 0.3, -ghw + gr * 0.3);
+    glowShape.quadraticCurveTo(0, -ghw, gr * 0.3, -ghw + gr * 0.3);
+    glowShape.lineTo(ghl - gr * 0.3, -ghw * 0.3);
+    glowShape.quadraticCurveTo(ghl, 0, ghl - gr, 0);
+    
+    const glowGeometry = new THREE.ShapeGeometry(glowShape);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    glow.position.copy(pos);
+    
+    if (cameraRef.current) {
+      glow.lookAt(cameraRef.current.position);
+      glow.rotateZ(angle);
+    }
+    
+    glow.userData = {
+      life: 0.25,
+      maxLife: 0.25,
+      initialScale: 1.0,
+      maxScale: 3.0,
+    };
+    
+    slashEffects.current.add(glow);
   };
 
   const triggerImpact = (color: number) => {
@@ -1257,6 +1366,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     const saberVel = hitBy === 'left' ? leftVelVector.current : rightVelVector.current;
                     createDebris(blockCenter, debrisColor, saberVel);
                     createExplosion(blockCenter, debrisColor);
+                    createSlashEffect(blockCenter, debrisColor, saberVel);
 
                     if (mesh) {
                         sceneRef.current?.remove(mesh);
@@ -1306,6 +1416,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             mat.opacity = u.life;
             
             if (u.life <= 0) shockwaveMeshes.current.remove(s);
+        }
+    }
+
+    // --- Update Slash Effects ---
+    if (slashEffects.current && !isPaused) {
+        for (let i = slashEffects.current.children.length - 1; i >= 0; i--) {
+            const slash = slashEffects.current.children[i] as THREE.Mesh;
+            const u = slash.userData as { life: number, maxLife: number, initialScale: number, maxScale: number };
+            const mat = slash.material as THREE.MeshBasicMaterial;
+
+            // Animate: expand uniformly, fade out
+            u.life -= dt;
+            const progress = 1 - (u.life / u.maxLife);
+            
+            // Expand scale over time (ease out)
+            const easeProgress = 1 - Math.pow(1 - progress, 2);
+            const currentScale = u.initialScale + (u.maxScale - u.initialScale) * easeProgress;
+            slash.scale.setScalar(currentScale);
+            
+            // Fade out (faster at the end)
+            mat.opacity = Math.max(0, Math.pow(u.life / u.maxLife, 0.5));
+            
+            if (u.life <= 0) slashEffects.current.remove(slash);
         }
     }
 
