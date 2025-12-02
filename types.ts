@@ -3,6 +3,32 @@ export type HandType = 'left' | 'right';
 export type BlockType = 'left' | 'right' | 'both';
 export type GameStatus = 'menu' | 'loading' | 'calibration' | 'playing' | 'gameover';
 
+// Slash direction for blocks - indicates the direction player should slash
+export type SlashDirection = 
+  | 'up'       // Slash upward ↑
+  | 'down'     // Slash downward ↓
+  | 'left'     // Slash left ←
+  | 'right'    // Slash right →
+  | 'up-left'  // Slash diagonal ↖
+  | 'up-right' // Slash diagonal ↗
+  | 'down-left'  // Slash diagonal ↙
+  | 'down-right' // Slash diagonal ↘
+  | 'any';     // Any direction (dot block)
+
+// Extended block note for beatmap - supports direction and color override
+export interface BlockNote {
+  track: string;           // Track label (e.g., 'L1', 'R2', 'T1')
+  direction?: SlashDirection; // Required slash direction (default: 'any')
+  color?: BlockType;       // Override color (default: derived from track)
+}
+
+// Beatmap beat data types
+export type BeatData = 
+  | null                   // Rest (no block)
+  | string                 // Simple track label
+  | BlockNote              // Single block with options
+  | (string | BlockNote)[]; // Multiple blocks
+
 export interface Point {
   x: number;
   y: number;
@@ -17,6 +43,7 @@ export interface Vector3D {
 export interface Block {
   id: string;
   type: BlockType;
+  direction: SlashDirection; // Required slash direction
   spawnTime: number; 
   targetPos: Point; 
   position: Vector3D; 

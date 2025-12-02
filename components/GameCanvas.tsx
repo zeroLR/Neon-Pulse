@@ -2,8 +2,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { PoseService } from '../services/poseService';
-import { GAME_CONFIG, BEAT_MAP, TRACK_LAYOUT, getTrackType, getTrackIndexByLabel, CALIBRATION_CONFIG } from '../constants';
-import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig } from '../types';
+import { GAME_CONFIG, BEAT_MAP, TRACK_LAYOUT, getTrackIndexByLabel, CALIBRATION_CONFIG, parseBeatNote } from '../constants';
+import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig, BlockNote, BeatData, SlashDirection } from '../types';
 import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
 import DebugMenu from './DebugMenu';
@@ -403,10 +403,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // --- Main Loop ---
 
-  const spawnSingleBlock = (trackLabel: string, time: number) => {
-    const trackIndex = getTrackIndexByLabel(trackLabel);
+  // Spawn a single block from a BlockNote
+  const spawnSingleBlock = (note: BlockNote, time: number) => {
+    const trackIndex = getTrackIndexByLabel(note.track);
     const target = TRACK_LAYOUT[trackIndex];
-    const type = getTrackType(trackLabel);
+    const type = note.color!; // Already parsed with default
+    const direction = note.direction!;
     
     const id = Math.random().toString(36);
     const mesh = createBlockMesh(type);
@@ -427,6 +429,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     blocks.current.push({
       id,
       type,
+      direction,
       spawnTime: time,
       targetPos: { x: target.x, y: target.y },
       startPos: startPos,
@@ -474,13 +477,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     if (Array.isArray(beatData)) {
       // Multiple simultaneous blocks
-      for (const trackLabel of beatData) {
-        const trackIdx = spawnSingleBlock(trackLabel, time);
+      for (const item of beatData) {
+        const note = parseBeatNote(item);
+        const trackIdx = spawnSingleBlock(note, time);
         spawnedTracks.push(trackIdx);
       }
     } else {
-      // Single block
-      const trackIdx = spawnSingleBlock(beatData, time);
+      // Single block (string or BlockNote)
+      const note = parseBeatNote(beatData);
+      const trackIdx = spawnSingleBlock(note, time);
       spawnedTracks.push(trackIdx);
     }
     

@@ -1,4 +1,6 @@
 
+import { BlockNote, BlockType, SlashDirection, BeatData } from './types';
+
 export const GAME_CONFIG = {
   ASPECT_RATIO: 16 / 9,
   
@@ -150,16 +152,20 @@ export const TRACK_LAYOUT = [
   { id: 11, label: 'B2', x: 0.55, y: 0.75 },
 ];
 
-// Beatmap Definition
-// Each row = one beat (quarter note at BPM)
-// Each element can be:
-//   - null: no block
-//   - string: single block on that track (e.g., 'L1', 'R2', 'T1', 'B2')
-//   - array: multiple blocks spawn simultaneously (e.g., ['L1', 'R1'])
+// Beatmap Definition (Extended Format)
+// Each row = one measure (4 beats at BPM)
+// Each beat can be:
+//   - null: no block (rest)
+//   - string: simple track label (e.g., 'L1', 'R2') - direction defaults to 'any'
+//   - BlockNote object: { track: 'L1', direction: 'down', color: 'left' }
+//   - array: multiple blocks spawn simultaneously
+//
 // Track labels: L1-L4 (left column), R1-R4 (right column), T1-T2 (top), B1-B2 (bottom)
+// Directions: 'up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right', 'any'
+// Colors: 'left' (cyan), 'right' (magenta), 'both' (white)
 
 // Helper to get track type (left/right/both) based on track label
-export const getTrackType = (label: string): 'left' | 'right' | 'both' => {
+export const getTrackType = (label: string): BlockType => {
   if (label.startsWith('L')) return 'left';
   if (label.startsWith('R')) return 'right';
   // T and B tracks can be hit by either hand
@@ -172,53 +178,177 @@ export const getTrackIndexByLabel = (label: string): number => {
   return track ? track.id : 0;
 };
 
-// Demo Beatmap - 4 measures with 4 beats each = 16 beats
-export const BEAT_MAP: (string | string[] | null)[][] = [
-  // Measure 1: Simple alternating
-  ['L2', null, 'R2', null],
+// Helper to parse beat data into normalized BlockNote format
+export const parseBeatNote = (data: string | BlockNote): BlockNote => {
+  if (typeof data === 'string') {
+    return {
+      track: data,
+      direction: 'any',
+      color: getTrackType(data)
+    };
+  }
+  return {
+    track: data.track,
+    direction: data.direction || 'any',
+    color: data.color || getTrackType(data.track)
+  };
+};
+
+// Direction arrow mapping for UI display
+export const DIRECTION_ARROWS: Record<SlashDirection, string> = {
+  'up': '↑',
+  'down': '↓',
+  'left': '←',
+  'right': '→',
+  'up-left': '↖',
+  'up-right': '↗',
+  'down-left': '↙',
+  'down-right': '↘',
+  'any': '●'
+};
+
+// Direction to angle mapping (radians, 0 = right, counterclockwise)
+export const DIRECTION_ANGLES: Record<SlashDirection, number> = {
+  'right': 0,
+  'up-right': Math.PI / 4,
+  'up': Math.PI / 2,
+  'up-left': (3 * Math.PI) / 4,
+  'left': Math.PI,
+  'down-left': (5 * Math.PI) / 4,
+  'down': (3 * Math.PI) / 2,
+  'down-right': (7 * Math.PI) / 4,
+  'any': 0 // No specific angle for 'any'
+};
+
+// Demo Beatmap - Extended format with direction support
+// Shorthand: just track label = any direction
+// Full: { track: 'L1', direction: 'down', color: 'left' }
+export const BEAT_MAP: BeatData[][] = [
+  // Measure 1: Simple alternating with directions
+  [
+    { track: 'L2', direction: 'down' },
+    null,
+    { track: 'R2', direction: 'down' },
+    null
+  ],
   
-  // Measure 2: Top row
-  ['T1', null, 'T2', null],
+  // Measure 2: Top row - slash upward
+  [
+    { track: 'T1', direction: 'up' },
+    null,
+    { track: 'T2', direction: 'up' },
+    null
+  ],
   
-  // Measure 3: Wider pattern
-  ['L1', 'R1', 'L4', 'R4'],
+  // Measure 3: Wider pattern with diagonal slashes
+  [
+    { track: 'L1', direction: 'down-right' },
+    { track: 'R1', direction: 'down-left' },
+    { track: 'L4', direction: 'up-right' },
+    { track: 'R4', direction: 'up-left' }
+  ],
   
   // Measure 4: Simultaneous blocks
-  ['L2', 'R2', ['T1', 'T2'], ['B1', 'B2']],
+  [
+    { track: 'L2', direction: 'right' },
+    { track: 'R2', direction: 'left' },
+    [{ track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    [{ track: 'B1', direction: 'up' }, { track: 'B2', direction: 'up' }]
+  ],
   
   // Measure 5: Cross pattern
-  ['L1', 'R4', 'L4', 'R1'],
+  [
+    { track: 'L1', direction: 'down-right' },
+    { track: 'R4', direction: 'up-left' },
+    { track: 'L4', direction: 'up-right' },
+    { track: 'R1', direction: 'down-left' }
+  ],
   
-  // Measure 6: Fast middle
-  [['L2', 'R2'], null, ['L3', 'R3'], null],
+  // Measure 6: Fast middle - horizontal slashes
+  [
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    null,
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }],
+    null
+  ],
   
-  // Measure 7: Escalating
-  ['L1', 'L2', 'L3', 'L4'],
+  // Measure 7: Escalating down the left side
+  [
+    { track: 'L1', direction: 'down' },
+    { track: 'L2', direction: 'down' },
+    { track: 'L3', direction: 'down' },
+    { track: 'L4', direction: 'down' }
+  ],
   
-  // Measure 8: Mirror
-  ['R1', 'R2', 'R3', 'R4'],
+  // Measure 8: Mirror - down the right side
+  [
+    { track: 'R1', direction: 'down' },
+    { track: 'R2', direction: 'down' },
+    { track: 'R3', direction: 'down' },
+    { track: 'R4', direction: 'down' }
+  ],
   
-  // Measure 9: All corners
-  [['L1', 'R1'], null, ['L4', 'R4'], null],
+  // Measure 9: All corners with diagonals
+  [
+    [{ track: 'L1', direction: 'down-right' }, { track: 'R1', direction: 'down-left' }],
+    null,
+    [{ track: 'L4', direction: 'up-right' }, { track: 'R4', direction: 'up-left' }],
+    null
+  ],
   
-  // Measure 10: Zigzag
-  ['L1', 'R2', 'L3', 'R4'],
+  // Measure 10: Zigzag with alternating directions
+  [
+    { track: 'L1', direction: 'right' },
+    { track: 'R2', direction: 'left' },
+    { track: 'L3', direction: 'right' },
+    { track: 'R4', direction: 'left' }
+  ],
   
-  // Measure 11: Bottom focus
-  ['B1', 'L4', 'B2', 'R4'],
+  // Measure 11: Bottom focus - upward slashes
+  [
+    { track: 'B1', direction: 'up' },
+    { track: 'L4', direction: 'up' },
+    { track: 'B2', direction: 'up' },
+    { track: 'R4', direction: 'up' }
+  ],
   
-  // Measure 12: Top focus
-  ['T1', 'L1', 'T2', 'R1'],
+  // Measure 12: Top focus - downward slashes
+  [
+    { track: 'T1', direction: 'down' },
+    { track: 'L1', direction: 'down' },
+    { track: 'T2', direction: 'down' },
+    { track: 'R1', direction: 'down' }
+  ],
   
-  // Measure 13: Dense
-  [['L2', 'R2'], ['L3', 'R3'], ['L2', 'R2'], ['L3', 'R3']],
+  // Measure 13: Dense - alternating horizontal
+  [
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }],
+    [{ track: 'L2', direction: 'right' }, { track: 'R2', direction: 'left' }],
+    [{ track: 'L3', direction: 'right' }, { track: 'R3', direction: 'left' }]
+  ],
   
-  // Measure 14: Breathing room
-  ['L2', null, null, 'R2'],
+  // Measure 14: Breathing room - any direction (dot blocks)
+  [
+    { track: 'L2', direction: 'any' },
+    null,
+    null,
+    { track: 'R2', direction: 'any' }
+  ],
   
   // Measure 15: Finale buildup
-  ['L1', 'R1', ['L2', 'R2'], ['L3', 'R3']],
+  [
+    { track: 'L1', direction: 'down' },
+    { track: 'R1', direction: 'down' },
+    [{ track: 'L2', direction: 'down' }, { track: 'R2', direction: 'down' }],
+    [{ track: 'L3', direction: 'down' }, { track: 'R3', direction: 'down' }]
+  ],
   
-  // Measure 16: Grand finale
-  [['L1', 'R1'], ['T1', 'T2'], ['B1', 'B2'], ['L4', 'R4']],
+  // Measure 16: Grand finale - mixed directions
+  [
+    [{ track: 'L1', direction: 'down-right' }, { track: 'R1', direction: 'down-left' }],
+    [{ track: 'T1', direction: 'down' }, { track: 'T2', direction: 'down' }],
+    [{ track: 'B1', direction: 'up' }, { track: 'B2', direction: 'up' }],
+    [{ track: 'L4', direction: 'up-right' }, { track: 'R4', direction: 'up-left' }]
+  ],
 ];
