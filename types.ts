@@ -77,4 +77,6 @@ export interface DebugConfig {
   saberScale: number;
   blockScale: number;
   showAvatar: boolean;
+  showTrail: boolean;
+  showCameraPreview: boolean;
 }
