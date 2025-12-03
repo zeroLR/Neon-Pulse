@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { PoseService } from '../services/poseService';
 import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, CALIBRATION_CONFIG, parseBeatNote } from '../constants';
 import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig, BlockNote, BeatData, SlashDirection, Beatmap } from '../types';
-import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home } from 'lucide-react';
+import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home, RotateCcw } from 'lucide-react';
 import CalibrationOverlay from './CalibrationOverlay';
 import DebugMenu from './DebugMenu';
 import { ScoreDisplay, ComboDisplay, HealthBar } from './HUD';
@@ -918,6 +918,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       );
     }
   };
+  
+  const restartYouTube = () => {
+    if (youtubePlayerRef.current?.contentWindow) {
+      // Seek to beginning and pause, will auto-play when countdown ends
+      youtubePlayerRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), '*'
+      );
+      youtubePlayerRef.current.contentWindow.postMessage(
+        JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*'
+      );
+    }
+  };
 
   // Handle Pause
   const handlePause = () => {
@@ -931,6 +943,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const handleExit = () => {
       setGameStatus('menu');
   }
+  
+  const handleRetry = () => {
+    setIsPaused(false);
+    restartYouTube();
+    initGame();
+  };
 
   // Keyboard shortcut for pause (ESC)
   useEffect(() => {
@@ -1002,6 +1020,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                   
                   <button onClick={handleResume} className="flex items-center justify-center gap-2 px-6 py-4 bg-[#00f3ff] text-black font-bold uppercase hover:bg-white transition-colors">
                       <Play size={20} fill="currentColor" /> Resume
+                  </button>
+                  
+                  <button onClick={handleRetry} className="flex items-center justify-center gap-2 px-6 py-4 border border-[#00f3ff] text-[#00f3ff] font-bold uppercase hover:bg-[#00f3ff]/20 transition-colors">
+                      <RotateCcw size={20} /> Retry
                   </button>
                   
                   <button onClick={handleExit} className="flex items-center justify-center gap-2 px-6 py-4 border border-gray-600 text-gray-300 font-bold uppercase hover:bg-white/10 transition-colors">
