@@ -183,11 +183,16 @@ export const updateTrail = (
 ): void => {
   if (!mesh || !saberGroup) return;
 
-  const base = saberGroup.position.clone();
+  const handleLength = 0.3 * saberScale; // Handle offset
   const bladeLength = 4.0 * saberScale;
-  const tip = base.clone().add(
-    new THREE.Vector3(0, 0, bladeLength).applyQuaternion(saberGroup.quaternion)
-  );
+  
+  // Trail starts at blade base (after handle), not at saber origin
+  const bladeBaseOffset = new THREE.Vector3(0, 0, handleLength).applyQuaternion(saberGroup.quaternion);
+  const base = saberGroup.position.clone().add(bladeBaseOffset);
+  
+  // Trail ends at blade tip
+  const bladeTipOffset = new THREE.Vector3(0, 0, handleLength + bladeLength).applyQuaternion(saberGroup.quaternion);
+  const tip = saberGroup.position.clone().add(bladeTipOffset);
 
   history.unshift({ base, tip });
   if (history.length > TRAIL_LENGTH) {
@@ -209,8 +214,8 @@ export const updateTrail = (
     positions[i * 6 + 5] = point.tip.z;
 
     const alpha = 1.0 - (i / TRAIL_LENGTH);
-    alphas[i * 2] = alpha * 0.5;
-    alphas[i * 2 + 1] = alpha * 0.5;
+    alphas[i * 2] = alpha * 0.2;
+    alphas[i * 2 + 1] = alpha * 0.2;
   }
 
   mesh.geometry.attributes.position.needsUpdate = true;

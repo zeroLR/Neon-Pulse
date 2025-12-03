@@ -71,14 +71,14 @@ export const GAME_CONFIG = {
   
   // Saber Hitbox (Local Dimensions)
   SABER_HITBOX_CONFIG: {
-    WIDTH: 1.3,  // Width of the cut zone (Increased to catch corners)
-    HEIGHT: 1.3, // Height of the cut zone
+    WIDTH: 1,  // Width of the cut zone (Increased to catch corners)
+    HEIGHT: 1, // Height of the cut zone
     LENGTH: 8.0, // Length of the blade coverage (Increased)
     OFFSET_Z: 2.5 // Shift forward to center box on blade
   },
   
   // Default Saber Scale
-  DEFAULT_SABER_SCALE: 2,
+  DEFAULT_SABER_SCALE: 3,
   
   // Default Trail Visibility
   DEFAULT_SHOW_TRAIL: true,
@@ -95,8 +95,8 @@ export const GAME_CONFIG = {
   
   // Screen Flash
   SCREEN_FLASH: {
-    OPACITY: 0.3,
-    DURATION: 80, // ms
+    OPACITY: 0.05,
+    DURATION: 60, // ms
   },
   
   // Camera Preview Window
