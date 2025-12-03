@@ -20,6 +20,7 @@
 - [x] Support customize beatmap (with youtube id)
 - [ ] Support more backgound
 - [ ] Design more gameplay
+- [x] Beatmap editor
 - [ ] Support customize music
 - [ ] Tutorial mode
 - [ ] Login and user profile
