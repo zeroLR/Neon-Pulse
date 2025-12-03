@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote } from '../constants';
-import { NormalizedLandmark, BlockNote, BeatData, Beatmap } from '../types';
+import { BlockNote, BeatData, Beatmap } from '../types';
 
 // Hooks
 import { 
@@ -10,9 +10,9 @@ import {
   useCameraPreview, 
   useCalibration,
   useThreeScene,
-  useYouTubePlayer
+  useYouTubePlayer,
+  usePoseTracking
 } from '../hooks';
-import { PoseService } from '../services/poseService';
 import { Results } from '../types';
 
 // Utils
@@ -50,7 +50,7 @@ import ErrorOverlay from './ErrorOverlay';
 
 interface GameCanvasProps {
   onGameOver: (score: number) => void;
-  gameStatus: 'loading' | 'playing' | 'gameover' | 'menu' | 'calibration' | 'beatmap-select';
+  gameStatus: 'loading' | 'playing' | 'gameover' | 'menu' | 'calibration' | 'beatmap-select' | 'beatmap-editor';
   setGameStatus: (status: any) => void;
   onCalibrationComplete: () => void;
   onRecalibrateRequest: () => void;
@@ -66,11 +66,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   beatmap
 }) => {
   // Refs
-  const videoRef = useRef<HTMLVideoElement>(null);
   const flashRef = useRef<HTMLDivElement>(null);
-  const poseService = useRef<PoseService | null>(null);
-  const rawLandmarks = useRef<NormalizedLandmark[] | null>(null);
-  const permissionError = useRef<string | null>(null);
+  const cameraStartedForSession = useRef<boolean>(false);
+
+  // Pose Tracking (lazy initialization)
+  const poseTracking = usePoseTracking();
+  const { 
+    rawLandmarks, 
+    permissionError, 
+    isActive: isPoseActive, 
+    isInitializing: isPoseInitializing, 
+    isReady: isPoseReady,  // True when first pose result received
+    start: startPose, 
+    stop: stopPose 
+  } = poseTracking;
 
   // Three.js Scene
   const threeScene = useThreeScene();
@@ -102,8 +111,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // Calibration
   const calibration = useCalibration(onCalibrationComplete);
 
-  // Camera Preview
-  const cameraPreview = useCameraPreview(videoRef, rawLandmarks, debugConfig.showCameraPreview);
+  // Camera Preview - only show when pose is ready
+  const cameraPreview = useCameraPreview(poseTracking.videoRef, rawLandmarks, debugConfig.showCameraPreview && isPoseReady);
 
   // Block speed based on BPM
   const travelDistance = Math.abs(GAME_CONFIG.SPAWN_Z - GAME_CONFIG.HIT_Z);
@@ -160,8 +169,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     shakeIntensity.current = GAME_CONFIG.CAMERA_SHAKE.INITIAL_INTENSITY;
   };
 
-  // Initialize game
-  const initGame = useCallback(() => {
+  // Initialize game (without starting countdown - that happens after camera is ready)
+  const initGame = useCallback((startCountdownImmediately: boolean = false) => {
     blocks.current = [];
     gameState.resetStats();
     const now = performance.now();
@@ -188,7 +197,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     clearBlockMeshes();
     clearEffects();
-    startCountdown();
+    
+    // Only start countdown if explicitly requested (e.g., when camera is already active)
+    if (startCountdownImmediately) {
+      startCountdown();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -514,14 +527,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Track previous game status to detect transition to 'playing'
   const prevGameStatus = useRef(gameStatus);
+  const gameInitialized = useRef(false);
   
   useEffect(() => {
     // Only init game when transitioning TO 'playing' status
     if (gameStatus === 'playing' && prevGameStatus.current !== 'playing') {
-      initGame();
+      gameInitialized.current = false;
+      // Initialize game state but don't start countdown yet (wait for camera)
+      initGame(false);
     }
     prevGameStatus.current = gameStatus;
   }, [gameStatus, initGame]);
+
+  // Start countdown when camera is READY (received first pose) and game is playing
+  useEffect(() => {
+    if (gameStatus === 'playing' && isPoseReady && !gameInitialized.current) {
+      gameInitialized.current = true;
+      startCountdown();
+    }
+  }, [gameStatus, isPoseReady, startCountdown]);
 
   useEffect(() => {
     if (gameStatus === 'playing' || gameStatus === 'calibration') {
@@ -535,31 +559,31 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     };
   }, [gameStatus, renderLoop, audio]);
 
-  // Pose tracking
-  const onResults = useCallback((results: Results) => {
-    if (results.poseLandmarks) {
-      rawLandmarks.current = results.poseLandmarks;
-    }
-  }, []);
-
+  // Pose tracking - start/stop based on game status
   useEffect(() => {
-    const startPose = async () => {
-      try {
-        const service = new PoseService(onResults);
-        await service.initialize();
-        poseService.current = service;
-        if (videoRef.current) {
-          await service.start(videoRef.current);
-          setGameStatus((prev: any) => (prev === 'loading' ? 'menu' : prev));
-        }
-      } catch (e) {
-        console.error(e);
-        permissionError.current = "Camera access failed.";
-      }
-    };
-    if (videoRef.current) startPose();
-    return () => poseService.current?.stop();
-  }, [onResults, setGameStatus]);
+    const shouldPoseBeActive = gameStatus === 'playing' || gameStatus === 'calibration';
+    
+    if (shouldPoseBeActive && !isPoseActive && !isPoseInitializing) {
+      // Start pose tracking when entering playing or calibration
+      startPose().then(() => {
+        cameraStartedForSession.current = true;
+      });
+    } else if (!shouldPoseBeActive && isPoseActive) {
+      // Stop pose tracking when leaving playing/calibration states
+      stopPose();
+    }
+  }, [gameStatus, isPoseActive, isPoseInitializing, startPose, stopPose]);
+
+  // Handle loading -> menu transition (no camera needed for menu)
+  useEffect(() => {
+    // Auto-transition from loading to menu after a short delay (no camera needed)
+    if (gameStatus === 'loading') {
+      const timer = setTimeout(() => {
+        setGameStatus('menu');
+      }, 500); // Short delay for initial load
+      return () => clearTimeout(timer);
+    }
+  }, [gameStatus, setGameStatus]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -610,7 +634,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const handleRetry = () => {
     setIsPaused(false);
     youtube.restartYouTube();
-    initGame();
+    // On retry, camera is already active, so start countdown immediately
+    initGame(true);
   };
 
   const handleExit = () => {
@@ -619,7 +644,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
-      <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none" playsInline muted />
       <div ref={containerRef} className="absolute inset-0 z-10" />
       
       <div ref={flashRef} className="absolute inset-0 z-30 pointer-events-none opacity-0 transition-opacity duration-75 ease-out mix-blend-add"></div>
@@ -663,15 +687,31 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         onToggleMute={audio.toggleMute}
       />
 
-      {debugConfig.showCameraPreview && (
+      {debugConfig.showCameraPreview && isPoseReady && (
         <CameraPreview cameraPreviewRef={cameraPreview.cameraPreviewRef} />
       )}
 
-      {gameStatus === 'playing' && beatmap.youtubeId && (
+      {/* Only load YouTube player after pose is ready */}
+      {gameStatus === 'playing' && beatmap.youtubeId && isPoseReady && (
         <YouTubePlayer beatmap={beatmap} youtubePlayerRef={youtube.youtubePlayerRef} />
       )}
 
-      {permissionError.current && <ErrorOverlay message={permissionError.current} />}
+      {permissionError && <ErrorOverlay message={permissionError} />}
+      
+      {/* Camera initialization overlay - show while initializing OR while waiting for first pose */}
+      {(isPoseInitializing || (isPoseActive && !isPoseReady)) && (gameStatus === 'playing' || gameStatus === 'calibration') && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-[#00f3ff] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-white font-mono text-lg">
+              {isPoseInitializing ? 'Initializing Camera...' : 'Detecting Pose...'}
+            </p>
+            <p className="text-gray-400 font-mono text-sm mt-2">
+              {isPoseInitializing ? 'Please allow camera access' : 'Please stand in view of the camera'}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

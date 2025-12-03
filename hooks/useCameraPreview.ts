@@ -12,7 +12,7 @@ export interface CameraPreviewAPI {
 }
 
 export const useCameraPreview = (
-  videoRef: RefObject<HTMLVideoElement>,
+  videoRef: RefObject<HTMLVideoElement | null>,
   rawLandmarks: MutableRefObject<NormalizedLandmark[] | null>,
   showPreview: boolean
 ): CameraPreviewAPI => {
