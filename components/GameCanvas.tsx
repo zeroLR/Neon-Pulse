@@ -614,7 +614,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const handleExit = () => {
-    setGameStatus('menu');
+    setGameStatus('beatmap-select');
   };
 
   return (

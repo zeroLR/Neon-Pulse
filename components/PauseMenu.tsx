@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Home, RotateCcw } from 'lucide-react';
+import { Play, Music, RotateCcw } from 'lucide-react';
 
 interface PauseMenuProps {
   onResume: () => void;
@@ -31,7 +31,7 @@ const PauseMenu: React.FC<PauseMenuProps> = ({ onResume, onRetry, onExit }) => {
           onClick={onExit}
           className="flex items-center justify-center gap-2 px-6 py-4 border border-gray-600 text-gray-300 font-bold uppercase hover:bg-white/10 transition-colors"
         >
-          <Home size={20} /> Exit to Menu
+          <Music size={20} /> Select Beatmap
         </button>
       </div>
     </div>
