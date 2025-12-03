@@ -215,30 +215,34 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
             <div className="absolute -inset-1 bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-300"></div>
             
             <div className="relative w-[400px] bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-              {/* Custom Badge & Action Buttons */}
+              {/* Badge & Action Buttons */}
               <div className="absolute top-4 left-4 flex gap-2 z-10">
+                {isCustomBeatmap(selectedBeatmap.id) ? (
+                  <span className="px-2 py-1 bg-purple-500/30 border border-purple-500 rounded text-purple-300 text-xs font-mono">
+                    CUSTOM
+                  </span>
+                ) : (
+                  <span className="px-2 py-1 bg-gray-500/30 border border-gray-500 rounded text-gray-300 text-xs font-mono">
+                    BUILT-IN
+                  </span>
+                )}
+                {onOpenEditor && (
+                  <button
+                    onClick={() => onOpenEditor(selectedBeatmap)}
+                    className="p-1 bg-cyan-500/30 border border-cyan-500 rounded text-cyan-300 hover:bg-cyan-500/50 transition-colors"
+                    title="Edit beatmap (creates a copy for custom beatmaps)"
+                  >
+                    <Edit size={14} />
+                  </button>
+                )}
                 {isCustomBeatmap(selectedBeatmap.id) && (
-                  <>
-                    <span className="px-2 py-1 bg-purple-500/30 border border-purple-500 rounded text-purple-300 text-xs font-mono">
-                      CUSTOM
-                    </span>
-                    {onOpenEditor && (
-                      <button
-                        onClick={() => onOpenEditor(selectedBeatmap)}
-                        className="p-1 bg-cyan-500/30 border border-cyan-500 rounded text-cyan-300 hover:bg-cyan-500/50 transition-colors"
-                        title="Edit beatmap"
-                      >
-                        <Edit size={14} />
-                      </button>
-                    )}
-                    <button
-                      onClick={handleDelete}
-                      className="p-1 bg-red-500/30 border border-red-500 rounded text-red-300 hover:bg-red-500/50 transition-colors"
-                      title="Delete beatmap"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </>
+                  <button
+                    onClick={handleDelete}
+                    className="p-1 bg-red-500/30 border border-red-500 rounded text-red-300 hover:bg-red-500/50 transition-colors"
+                    title="Delete beatmap"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 )}
               </div>
 
