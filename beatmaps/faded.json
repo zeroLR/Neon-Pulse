@@ -6,6 +6,7 @@
   "difficulty": "normal",
   "difficultyRating": 5,
   "youtubeId": "60ItHLz5WEA",
+  "startDelay": 1000,
   "data": [
     [null, null, null, null],
     [null, null, null, null],

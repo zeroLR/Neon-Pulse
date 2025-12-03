@@ -109,6 +109,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const travelDistance = Math.abs(GAME_CONFIG.SPAWN_Z - GAME_CONFIG.HIT_Z);
   const secondsPerBeat = 60 / beatmap.bpm;
   const blockSpeed = travelDistance / secondsPerBeat;
+  
+  // Start delay: use beatmap's startDelay or default
+  const startDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
 
   // Game state refs
   const blocks = useRef<any[]>([]);
@@ -165,7 +168,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     lastTime.current = now;
     lastUpdateTime.current = now;
     accumulatedGameTime.current = 0; // Reset accumulated time
-    nextSpawnTime.current = GAME_CONFIG.INITIAL_SPAWN_DELAY; // Use game time, not real time
+    nextSpawnTime.current = startDelay; // Use beatmap's startDelay
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
@@ -254,7 +257,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
     const totalBeats = getTotalBeats();
     
-    const effectiveGameTime = gameTime - GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    const effectiveGameTime = gameTime - startDelay;
     const currentBeatIndex = Math.max(0, Math.floor(effectiveGameTime / beatInterval));
     const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
     

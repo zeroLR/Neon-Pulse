@@ -18,6 +18,7 @@ export interface Beatmap {
   noteCount: number;
   data: BeatData[][];
   youtubeId?: string; // Optional YouTube video ID for music source
+  startDelay?: number; // Optional delay in ms before first beat (for YouTube sync)
 }
 
 // Slash direction for blocks - indicates the direction player should slash

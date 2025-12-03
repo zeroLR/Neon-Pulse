@@ -18,6 +18,7 @@ export interface RawBeatmap {
   difficulty: 'easy' | 'normal' | 'hard' | 'expert';
   difficultyRating: number;
   youtubeId?: string;
+  startDelay?: number; // Optional delay in ms before first beat
   data: BeatData[][];
 }
 
@@ -249,6 +250,7 @@ class BeatmapStorageService {
       difficulty: beatmap.difficulty,
       difficultyRating: beatmap.difficultyRating,
       youtubeId: beatmap.youtubeId,
+      startDelay: beatmap.startDelay,
       data: beatmap.data,
     };
     
