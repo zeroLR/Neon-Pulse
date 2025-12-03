@@ -1,24 +1,26 @@
-
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { PoseService } from '../services/poseService';
-import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, CALIBRATION_CONFIG, parseBeatNote } from '../constants';
-import { Block, BlockType, GameStats, Results, NormalizedLandmark, DebugConfig, BlockNote, BeatData, SlashDirection, Beatmap } from '../types';
-import { Volume2, VolumeX, AlertTriangle, Pause, Play, Home, RotateCcw } from 'lucide-react';
-import CalibrationOverlay from './CalibrationOverlay';
-import DebugMenu from './DebugMenu';
-import { ScoreDisplay, ComboDisplay, HealthBar } from './HUD';
-import { useAudio, useGameState, useCameraPreview, useCalibration } from '../hooks';
+import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote } from '../constants';
+import { NormalizedLandmark, BlockNote, BeatData, Beatmap } from '../types';
+
+// Hooks
 import { 
-  createBlockMesh, 
-  createSaberMesh, 
-  createTrailMesh, 
+  useAudio, 
+  useGameState, 
+  useCameraPreview, 
+  useCalibration,
+  useThreeScene,
+  useYouTubePlayer
+} from '../hooks';
+import { PoseService } from '../services/poseService';
+import { Results } from '../types';
+
+// Utils
+import { 
+  createBlockMesh,
   updateTrail as updateTrailUtil,
-  createAvatarMesh,
-  mapTo3D as mapTo3DUtil,
   updateAvatar as updateAvatarUtil,
-  TRAIL_LENGTH,
-  AvatarParts
+  mapTo3D as mapTo3DUtil,
 } from '../utils/threeHelpers';
 import { 
   getSaberBladePoints, 
@@ -35,6 +37,17 @@ import {
   EffectRefs
 } from '../utils/effects';
 
+// Components
+import CalibrationOverlay from './CalibrationOverlay';
+import DebugMenu from './DebugMenu';
+import PauseMenu from './PauseMenu';
+import CountdownOverlay from './CountdownOverlay';
+import GameHUD from './GameHUD';
+import ControlButtons from './ControlButtons';
+import CameraPreview from './CameraPreview';
+import YouTubePlayer from './YouTubePlayer';
+import ErrorOverlay from './ErrorOverlay';
+
 interface GameCanvasProps {
   onGameOver: (score: number) => void;
   gameStatus: 'loading' | 'playing' | 'gameover' | 'menu' | 'calibration' | 'beatmap-select';
@@ -45,58 +58,31 @@ interface GameCanvasProps {
 }
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
-    onGameOver, 
-    gameStatus, 
-    setGameStatus, 
-    onCalibrationComplete,
-    onRecalibrateRequest,
-    beatmap
+  onGameOver, 
+  gameStatus, 
+  setGameStatus, 
+  onCalibrationComplete,
+  onRecalibrateRequest,
+  beatmap
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
-  const flashRef = useRef<HTMLDivElement>(null); // Screen flash overlay
+  const flashRef = useRef<HTMLDivElement>(null);
   const poseService = useRef<PoseService | null>(null);
-  const youtubePlayerRef = useRef<HTMLIFrameElement>(null);
+  const rawLandmarks = useRef<NormalizedLandmark[] | null>(null);
+  const permissionError = useRef<string | null>(null);
 
-  // Calculate block speed based on BPM
-  // Block should travel from SPAWN_Z to HIT_Z (0) in exactly one beat
-  const travelDistance = Math.abs(GAME_CONFIG.SPAWN_Z - GAME_CONFIG.HIT_Z); // Distance to travel
-  const secondsPerBeat = 60 / beatmap.bpm; // Time per beat in seconds
-  const blockSpeed = travelDistance / secondsPerBeat; // Speed in units per second
+  // Three.js Scene
+  const threeScene = useThreeScene();
+  const { containerRef, refs: sceneRefs, shakeIntensity, clearBlockMeshes, clearEffects } = threeScene;
 
-  // --- Three.js Refs ---
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const requestRef = useRef<number | null>(null);
-  
-  // Object Pools / References
-  const blockMeshes = useRef<Map<string, THREE.Group>>(new Map());
-  const particleMeshes = useRef<THREE.Group | null>(null);
-  const debrisMeshes = useRef<THREE.Group | null>(null);
-  const shockwaveMeshes = useRef<THREE.Group | null>(null); 
-  const slashEffects = useRef<THREE.Group | null>(null);
-  const leftSaberRef = useRef<THREE.Group | null>(null);
-  const rightSaberRef = useRef<THREE.Group | null>(null);
-  const trackLinesRef = useRef<THREE.Line[]>([]);
-  
-  // Trails
-  const leftTrailRef = useRef<THREE.Mesh | null>(null);
-  const rightTrailRef = useRef<THREE.Mesh | null>(null);
-  const leftTrailHistory = useRef<{base: THREE.Vector3, tip: THREE.Vector3}[]>([]);
-  const rightTrailHistory = useRef<{base: THREE.Vector3, tip: THREE.Vector3}[]>([]);
+  // YouTube Player
+  const youtube = useYouTubePlayer();
 
-  // Camera Shake
-  const shakeIntensity = useRef<number>(0);
-  
-  // Avatar Refs
-  const avatarGroupRef = useRef<THREE.Group | null>(null);
-  const avatarParts = useRef<AvatarParts | null>(null);
+  // Audio
+  const audio = useAudio();
 
-  // Debug Visuals Group
-  const debugGroupRef = useRef<THREE.Group | null>(null);
-
-  // --- Game State (using custom hook) ---
+  // Game State
   const gameState = useGameState();
   const { 
     stats, 
@@ -112,350 +98,135 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     isDebugOpen, 
     setIsDebugOpen 
   } = gameState;
-  
-  // Block management (kept here as it involves Three.js objects)
+
+  // Calibration
+  const calibration = useCalibration(onCalibrationComplete);
+
+  // Camera Preview
+  const cameraPreview = useCameraPreview(videoRef, rawLandmarks, debugConfig.showCameraPreview);
+
+  // Block speed based on BPM
+  const travelDistance = Math.abs(GAME_CONFIG.SPAWN_Z - GAME_CONFIG.HIT_Z);
+  const secondsPerBeat = 60 / beatmap.bpm;
+  const blockSpeed = travelDistance / secondsPerBeat;
+
+  // Game state refs
   const blocks = useRef<any[]>([]);
   const lastTime = useRef<number>(0);
   const nextSpawnTime = useRef<number>(0);
-  const gameStartTime = useRef<number>(0); // Track when game started for relative time
+  const accumulatedGameTime = useRef<number>(0); // Total game time excluding pauses
+  const lastUpdateTime = useRef<number>(0); // Last frame time for delta calculation
   const beatmapCompleted = useRef<boolean>(false);
   const gameOverDelayTimer = useRef<number | null>(null);
-  const spawnedBeatIndex = useRef<number>(0); // Track which beats have been spawned
-  
-  // Use Ref for visual-only state to avoid re-renders resetting the game loop
+  const spawnedBeatIndex = useRef<number>(0);
   const nextTrackFlash = useRef<number[] | null>(null);
+  const requestRef = useRef<number | null>(null);
 
-  // Raw Landmarks (from MediaPipe)
-  const rawLandmarks = useRef<NormalizedLandmark[] | null>(null);
-  
-  // Calibration (using custom hook)
-  const calibration = useCalibration(onCalibrationComplete);
-  
-  // Camera Preview (using custom hook)
-  const cameraPreview = useCameraPreview(videoRef, rawLandmarks, debugConfig.showCameraPreview);
-
-  // Previous Frame 3D Positions (for velocity calc)
+  // Velocity tracking
   const prevLeftPos = useRef<THREE.Vector3>(new THREE.Vector3());
   const prevRightPos = useRef<THREE.Vector3>(new THREE.Vector3());
-  
-  // Current Velocity
-  const leftVelocity = useRef<number>(0);
-  const rightVelocity = useRef<number>(0);
   const leftVelVector = useRef<THREE.Vector3>(new THREE.Vector3());
   const rightVelVector = useRef<THREE.Vector3>(new THREE.Vector3());
+  const leftTrailHistory = useRef<{base: THREE.Vector3, tip: THREE.Vector3}[]>([]);
+  const rightTrailHistory = useRef<{base: THREE.Vector3, tip: THREE.Vector3}[]>([]);
+  const prevLeftBladePoints = useRef<THREE.Vector3[]>([]);
+  const prevRightBladePoints = useRef<THREE.Vector3[]>([]);
 
-  // Audio (using custom hook)
-  const audio = useAudio();
-  const [permissionError, setPermissionError] = useState<string | null>(null);
-
-  // --- Initialization ---
-
-  // createBlockMesh is now imported from utils/threeHelpers
-
-  // createSaberMesh is now imported from utils/threeHelpers
-
-  // createTrailMesh is now imported from utils/threeHelpers
-
-  // Wrapper for updateTrail to use refs
-  const updateTrail = (
-      mesh: THREE.Mesh | null, 
-      history: React.MutableRefObject<{base: THREE.Vector3, tip: THREE.Vector3}[]>,
-      saberGroup: THREE.Group | null,
-      saberScale: number
-  ) => {
-      updateTrailUtil(mesh, history.current, saberGroup, saberScale);
-  };
-
-  // createAvatarMesh is now imported from utils/threeHelpers
-
-  /**
-   * Helper: Convert normalized 2D to 3D (wrapper for utility function).
-   */
+  // Helper functions
   const mapTo3D = (normX: number, normY: number, rawZ: number, forceCompute = false): THREE.Vector3 => {
-     return mapTo3DUtil(normX, normY, rawZ, cameraRef.current, forceCompute);
+    return mapTo3DUtil(normX, normY, rawZ, sceneRefs.current.camera, forceCompute);
   };
 
-  const initThree = () => {
-    if (!containerRef.current) return;
-    
-    const width = window.innerWidth || 1280;
-    const height = window.innerHeight || 720;
+  const getEffectRefs = (): EffectRefs => ({
+    particleMeshes: sceneRefs.current.particleMeshes!,
+    debrisMeshes: sceneRefs.current.debrisMeshes!,
+    shockwaveMeshes: sceneRefs.current.shockwaveMeshes!,
+    slashEffects: sceneRefs.current.slashEffects!,
+    camera: sceneRefs.current.camera
+  });
 
-    // Scene
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a12); // Dark blue-ish background
-    scene.fog = new THREE.Fog(0x0a0a12, 50, 400); // Fog for depth effect
-    sceneRef.current = scene;
-
-    // Camera
-    const camera = new THREE.PerspectiveCamera(
-      GAME_CONFIG.CAMERA.FOV, 
-      width / height, 
-      GAME_CONFIG.CAMERA.NEAR, 
-      GAME_CONFIG.CAMERA.FAR
-    );
-    camera.position.set(0, GAME_CONFIG.CAMERA.POSITION_Y, GAME_CONFIG.CAMERA_Z);
-    camera.lookAt(0, 0, GAME_CONFIG.CAMERA.LOOK_AT_Z);
-    cameraRef.current = camera;
-
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, GAME_CONFIG.LIGHTS.AMBIENT_INTENSITY);
-    scene.add(ambientLight);
-    const pointLight = new THREE.PointLight(
-      0xffffff, 
-      GAME_CONFIG.LIGHTS.POINT_INTENSITY, 
-      GAME_CONFIG.LIGHTS.POINT_DISTANCE
-    );
-    pointLight.position.set(
-      GAME_CONFIG.LIGHTS.POINT_POSITION.x, 
-      GAME_CONFIG.LIGHTS.POINT_POSITION.y, 
-      GAME_CONFIG.LIGHTS.POINT_POSITION.z
-    );
-    scene.add(pointLight);
-
-    // Grid (Floor) - Raised for TPS
-    const gridHelper = new THREE.GridHelper(
-      GAME_CONFIG.GRID.SIZE, 
-      GAME_CONFIG.GRID.DIVISIONS, 
-      GAME_CONFIG.GRID.COLOR_CENTER, 
-      GAME_CONFIG.GRID.COLOR_GRID
-    );
-    gridHelper.position.y = GAME_CONFIG.GRID.POSITION_Y;
-    gridHelper.position.z = GAME_CONFIG.GRID.POSITION_Z;
-    scene.add(gridHelper);
-
-    // Avatar
-    const avatarResult = createAvatarMesh();
-    scene.add(avatarResult.group);
-    avatarGroupRef.current = avatarResult.group;
-    avatarParts.current = avatarResult.parts;
-
-    // Sabers
-    const lSaber = createSaberMesh(GAME_CONFIG.COLORS.CYAN);
-    lSaber.scale.setScalar(GAME_CONFIG.DEFAULT_SABER_SCALE);
-    scene.add(lSaber);
-    leftSaberRef.current = lSaber;
-
-    const rSaber = createSaberMesh(GAME_CONFIG.COLORS.MAGENTA);
-    rSaber.scale.setScalar(GAME_CONFIG.DEFAULT_SABER_SCALE);
-    scene.add(rSaber);
-    rightSaberRef.current = rSaber;
-
-    // Trails
-    const lTrail = createTrailMesh(GAME_CONFIG.COLORS.CYAN);
-    scene.add(lTrail);
-    leftTrailRef.current = lTrail;
-
-    const rTrail = createTrailMesh(GAME_CONFIG.COLORS.MAGENTA);
-    scene.add(rTrail);
-    rightTrailRef.current = rTrail;
-
-    // Particles Group
-    const pGroup = new THREE.Group();
-    scene.add(pGroup);
-    particleMeshes.current = pGroup;
-
-    // Debris Group
-    const dGroup = new THREE.Group();
-    scene.add(dGroup);
-    debrisMeshes.current = dGroup;
-    
-    // Shockwave Group
-    const sGroup = new THREE.Group();
-    scene.add(sGroup);
-    shockwaveMeshes.current = sGroup;
-
-    // Slash Effects Group
-    const slashGroup = new THREE.Group();
-    scene.add(slashGroup);
-    slashEffects.current = slashGroup;
-
-    // Debug Group
-    const debugGroup = new THREE.Group();
-    scene.add(debugGroup);
-    debugGroupRef.current = debugGroup;
+  const triggerImpact = (color: number) => {
+    if (flashRef.current) {
+      const hex = '#' + new THREE.Color(color).getHexString();
+      flashRef.current.style.backgroundColor = hex;
+      flashRef.current.style.opacity = String(GAME_CONFIG.SCREEN_FLASH.OPACITY);
+      setTimeout(() => {
+        if (flashRef.current) flashRef.current.style.opacity = '0';
+      }, GAME_CONFIG.SCREEN_FLASH.DURATION);
+    }
+    shakeIntensity.current = GAME_CONFIG.CAMERA_SHAKE.INITIAL_INTENSITY;
   };
 
-  // --- Logic Helpers ---
-
+  // Initialize game
   const initGame = useCallback(() => {
     blocks.current = [];
     gameState.resetStats();
     const now = performance.now();
     lastTime.current = now;
-    gameStartTime.current = now; // Record game start time
-    nextSpawnTime.current = now + GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    lastUpdateTime.current = now;
+    accumulatedGameTime.current = 0; // Reset accumulated time
+    nextSpawnTime.current = GAME_CONFIG.INITIAL_SPAWN_DELAY; // Use game time, not real time
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
     
-    // Reset beatmap position
     currentMeasure.current = 0;
     currentBeat.current = 0;
     beatmapCompleted.current = false;
-    spawnedBeatIndex.current = 0; // Reset spawned beat index for retry
+    spawnedBeatIndex.current = 0;
+    
     if (gameOverDelayTimer.current !== null) {
       clearTimeout(gameOverDelayTimer.current);
       gameOverDelayTimer.current = null;
     }
     
-    // Clear trails on restart
     leftTrailHistory.current = [];
     rightTrailHistory.current = [];
     
-    if (sceneRef.current) {
-        blockMeshes.current.forEach(mesh => sceneRef.current?.remove(mesh));
-        blockMeshes.current.clear();
-        if (particleMeshes.current) particleMeshes.current.clear();
-        if (debrisMeshes.current) debrisMeshes.current.clear();
-        if (shockwaveMeshes.current) shockwaveMeshes.current.clear();
-        if (slashEffects.current) slashEffects.current.clear();
-    }
-
+    clearBlockMeshes();
+    clearEffects();
     startCountdown();
-  }, [startCountdown]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Audio functions are now provided by useAudio hook
-  const playSlashSound = audio.playSlashSound;
-  const playSound = audio.playSound;
-
-  // Helper to get effect refs
-  const getEffectRefs = (): EffectRefs => ({
-    particleMeshes: particleMeshes.current!,
-    debrisMeshes: debrisMeshes.current!,
-    shockwaveMeshes: shockwaveMeshes.current!,
-    slashEffects: slashEffects.current!,
-    camera: cameraRef.current
-  });
-
-  // Wrapper functions for effects
-  const createExplosion = (pos: THREE.Vector3, color: number) => {
-    createExplosionUtil(pos, color, getEffectRefs());
-  };
-
-  const createSlashEffect = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
-    createSlashEffectUtil(pos, color, saberVelocity, getEffectRefs());
-  };
-
-  const createDebris = (pos: THREE.Vector3, color: number, saberVelocity: THREE.Vector3) => {
-    if (debrisMeshes.current) {
-      createDebrisUtil(pos, color, saberVelocity, debrisMeshes.current);
+  // Spawn block helpers
+  const getBeatDataAtIndex = (globalBeatIndex: number): BeatData | null => {
+    let beatIdx = globalBeatIndex;
+    for (let m = 0; m < beatmap.data.length; m++) {
+      const measure = beatmap.data[m];
+      if (beatIdx < measure.length) {
+        return measure[beatIdx];
+      }
+      beatIdx -= measure.length;
     }
+    return null;
   };
 
-  const triggerImpact = (color: number) => {
-      // 1. Screen Flash
-      if (flashRef.current) {
-          const hex = '#' + new THREE.Color(color).getHexString();
-          flashRef.current.style.backgroundColor = hex;
-          flashRef.current.style.opacity = String(GAME_CONFIG.SCREEN_FLASH.OPACITY);
-          setTimeout(() => {
-              if (flashRef.current) flashRef.current.style.opacity = '0';
-          }, GAME_CONFIG.SCREEN_FLASH.DURATION);
-      }
-      
-      // 2. Camera Shake
-      shakeIntensity.current = GAME_CONFIG.CAMERA_SHAKE.INITIAL_INTENSITY;
+  const getTotalBeats = (): number => {
+    return beatmap.data.reduce((sum, measure) => sum + measure.length, 0);
   };
 
-  const updateDebugVisuals = (
-      lPos: THREE.Vector3, rPos: THREE.Vector3, 
-      lKnuckle: THREE.Vector3, rKnuckle: THREE.Vector3
-  ) => {
-      if (debugGroupRef.current) {
-          const group = debugGroupRef.current;
-          group.clear();
-          
-          if (debugConfig.showNodes) {
-              const sphereGeo = new THREE.SphereGeometry(0.1, 8, 8);
-              const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-              
-              const l1 = new THREE.Mesh(sphereGeo, mat); l1.position.copy(lPos); group.add(l1);
-              const r1 = new THREE.Mesh(sphereGeo, mat); r1.position.copy(rPos); group.add(r1);
-              const l2 = new THREE.Mesh(sphereGeo, mat); l2.position.copy(lKnuckle); group.add(l2);
-              const r2 = new THREE.Mesh(sphereGeo, mat); r2.position.copy(rKnuckle); group.add(r2);
-          }
-      }
-
-      const toggleSaberHitbox = (saber: THREE.Group | null) => {
-          if (!saber) return;
-          const hitbox = saber.getObjectByName('hitbox') as THREE.Mesh;
-          if (hitbox) {
-              hitbox.visible = debugConfig.showHitboxes;
-          }
-      };
-      toggleSaberHitbox(leftSaberRef.current);
-      toggleSaberHitbox(rightSaberRef.current);
-
-      blockMeshes.current.forEach((mesh) => {
-          const hitbox = mesh.getObjectByName('hitbox') as THREE.Mesh;
-          if (hitbox) {
-              hitbox.visible = debugConfig.showBlockHitboxes;
-          }
-      });
-  };
-
-  // Store previous frame's saber blade points for sweep detection
-  const prevLeftBladePoints = useRef<THREE.Vector3[]>([]);
-  const prevRightBladePoints = useRef<THREE.Vector3[]>();
-
-  // Wrapper for checkBlockCollision to use current debugConfig
-  const checkBlockCollision = (
-    saberGroup: THREE.Group, 
-    blockWorldPos: THREE.Vector3, 
-    prevBladePoints: THREE.Vector3[]
-  ) => {
-    return checkBlockCollisionUtil(
-      saberGroup, 
-      blockWorldPos, 
-      prevBladePoints,
-      debugConfig.blockScale,
-      debugConfig.saberScale
-    );
-  };
-
-  // Wrapper for updateAvatar to use refs
-  const updateAvatar = (lm: NormalizedLandmark[]) => {
-    return updateAvatarUtil(lm, avatarParts.current, cameraRef.current);
-  };
-
-  // --- Main Loop ---
-
-  // Spawn a single block from a BlockNote
-  // beatsAhead: how many beats in the future this block should arrive (0 = next beat)
   const spawnSingleBlock = (note: BlockNote, time: number, beatsAhead: number = 0) => {
     const trackIndex = getTrackIndexByLabel(note.track);
     const target = TRACK_LAYOUT[trackIndex];
-    const type = note.color!; // Already parsed with default
+    const type = note.color!;
     const direction = note.direction!;
     
     const id = Math.random().toString(36);
     const mesh = createBlockMesh(type);
     
-    // Calculate 3D Target (at Z=0)
     const target3D = mapTo3D(target.x, target.y, 0, true);
-    
-    // Calculate spawn Z based on how far ahead this block is
-    // Each beat ahead = one more beat of travel distance
     const extraDistance = beatsAhead * travelDistance;
     const spawnZ = GAME_CONFIG.SPAWN_Z - extraDistance;
     
-    // Calculate 3D Start position
     const startX = target3D.x * GAME_CONFIG.SPAWN.SPREAD_FACTOR;
     const startY = target3D.y * GAME_CONFIG.SPAWN.SPREAD_FACTOR;
     const startPos = new THREE.Vector3(startX, startY, spawnZ);
 
     mesh.position.copy(startPos);
     
-    if (sceneRef.current) sceneRef.current.add(mesh);
-    blockMeshes.current.set(id, mesh);
+    if (sceneRefs.current.scene) sceneRefs.current.scene.add(mesh);
+    sceneRefs.current.blockMeshes.set(id, mesh);
 
     blocks.current.push({
       id,
@@ -474,37 +245,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return trackIndex;
   };
 
-  // Helper to get beat data at a specific global beat index
-  const getBeatDataAtIndex = (globalBeatIndex: number): BeatData | null => {
-    let beatIdx = globalBeatIndex;
-    for (let m = 0; m < beatmap.data.length; m++) {
-      const measure = beatmap.data[m];
-      if (beatIdx < measure.length) {
-        return measure[beatIdx];
-      }
-      beatIdx -= measure.length;
-    }
-    return null; // Past end of beatmap
-  };
-
-  // Get total beats in beatmap
-  const getTotalBeats = (): number => {
-    return beatmap.data.reduce((sum, measure) => sum + measure.length, 0);
-  };
-
-  const spawnBlock = (time: number) => {
-    if (time < nextSpawnTime.current) return;
+  const spawnBlock = () => {
+    const gameTime = accumulatedGameTime.current;
+    if (gameTime < nextSpawnTime.current) return;
     if (beatmapCompleted.current) return;
     
     const beatInterval = 60000 / beatmap.bpm;
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
     const totalBeats = getTotalBeats();
     
-    // Calculate which beat should be hitting now (using relative time from game start)
-    const gameTime = time - gameStartTime.current - GAME_CONFIG.INITIAL_SPAWN_DELAY;
-    const currentBeatIndex = Math.max(0, Math.floor(gameTime / beatInterval));
-    
-    // Spawn all beats up to lookahead ahead that haven't been spawned yet
+    const effectiveGameTime = gameTime - GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    const currentBeatIndex = Math.max(0, Math.floor(effectiveGameTime / beatInterval));
     const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
     
     while (spawnedBeatIndex.current <= targetSpawnIndex) {
@@ -512,447 +263,302 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const beatData = getBeatDataAtIndex(beatIndex);
       
       if (beatData === null) {
-        // Check if we've reached the end
         if (beatIndex >= totalBeats) {
           beatmapCompleted.current = true;
           break;
         }
-        // Skip rest beats
         spawnedBeatIndex.current++;
         continue;
       }
       
-      // Calculate how many beats ahead this block is from the current beat
       const beatsAhead = beatIndex - currentBeatIndex;
-      
-      const spawnedTracks: number[] = [];
       
       if (Array.isArray(beatData)) {
         for (const item of beatData) {
           const note = parseBeatNote(item);
-          const trackIdx = spawnSingleBlock(note, time, beatsAhead);
-          spawnedTracks.push(trackIdx);
+          spawnSingleBlock(note, gameTime, beatsAhead);
         }
       } else {
         const note = parseBeatNote(beatData);
-        const trackIdx = spawnSingleBlock(note, time, beatsAhead);
-        spawnedTracks.push(trackIdx);
+        spawnSingleBlock(note, gameTime, beatsAhead);
       }
       
       spawnedBeatIndex.current++;
     }
     
-    // Check if beatmap is complete
     if (spawnedBeatIndex.current >= totalBeats) {
       beatmapCompleted.current = true;
     }
     
-    // Update next spawn time
-    nextSpawnTime.current = time + beatInterval;
+    nextSpawnTime.current = gameTime + beatInterval;
   };
 
-  // Effect to sync settings with meshes
-  useEffect(() => {
-    if (leftSaberRef.current) leftSaberRef.current.scale.setScalar(debugConfig.saberScale);
-    if (rightSaberRef.current) rightSaberRef.current.scale.setScalar(debugConfig.saberScale);
-    if (avatarGroupRef.current) avatarGroupRef.current.visible = debugConfig.showAvatar;
-    if (leftTrailRef.current) leftTrailRef.current.visible = debugConfig.showTrail;
-    if (rightTrailRef.current) rightTrailRef.current.visible = debugConfig.showTrail;
+  // Main update loop
+  const update = useCallback((time: number) => {
+    const rawDt = (time - lastUpdateTime.current) / 1000;
+    const dt = Math.min(rawDt, 0.1);
+    lastUpdateTime.current = time;
     
-    blockMeshes.current.forEach((mesh) => {
-        mesh.scale.setScalar(debugConfig.blockScale);
-    });
-  }, [debugConfig]);
-
-  const update = (time: number) => {
-    const dt = Math.min((time - lastTime.current) / 1000, 0.1); 
+    // Only accumulate game time when playing and not paused
+    if (gameStatus === 'playing' && !isPaused && isGameActive.current) {
+      accumulatedGameTime.current += dt * 1000; // Convert to ms
+    }
+    
     lastTime.current = time;
 
-    // --- Camera Shake & Impact Effects ---
-    if (shakeIntensity.current > 0 && cameraRef.current) {
-        const amount = shakeIntensity.current;
-        const rx = (Math.random() - 0.5) * amount;
-        const ry = (Math.random() - 0.5) * amount;
-        cameraRef.current.position.set(rx, GAME_CONFIG.CAMERA.POSITION_Y + ry, GAME_CONFIG.CAMERA_Z);
-        
-        shakeIntensity.current *= GAME_CONFIG.CAMERA_SHAKE.DECAY_RATE;
-        if (shakeIntensity.current < GAME_CONFIG.CAMERA_SHAKE.THRESHOLD) {
-            shakeIntensity.current = 0;
-            cameraRef.current.position.set(0, GAME_CONFIG.CAMERA.POSITION_Y, GAME_CONFIG.CAMERA_Z);
-        }
-    }
-
-    // --- MediaPipe Processing ---
     let currentLeftPos = new THREE.Vector3();
     let currentRightPos = new THREE.Vector3();
     
     if (rawLandmarks.current) {
-        const lm = rawLandmarks.current;
-        
-        // Update Stickman Avatar
-        const avatarData = updateAvatar(lm);
+      const lm = rawLandmarks.current;
+      const avatarData = updateAvatarUtil(lm, sceneRefs.current.avatarParts, sceneRefs.current.camera);
 
-        if (avatarData) {
-            currentLeftPos = avatarData.lWrist;
-            currentRightPos = avatarData.rWrist;
+      if (avatarData) {
+        currentLeftPos = avatarData.lWrist;
+        currentRightPos = avatarData.rWrist;
 
-            // Update Sabers (Attached to Wrist, Pointing toward Palm)
-            if (leftSaberRef.current) {
-                leftSaberRef.current.position.copy(currentLeftPos);
-                // Direction: Wrist -> Palm (extend through hand)
-                const dir = new THREE.Vector3().subVectors(avatarData.lPalm, currentLeftPos).normalize();
-                leftSaberRef.current.lookAt(currentLeftPos.clone().add(dir));
-                leftSaberRef.current.updateMatrixWorld(true);
-            }
-            if (rightSaberRef.current) {
-                rightSaberRef.current.position.copy(currentRightPos);
-                // Direction: Wrist -> Palm (extend through hand)
-                const dir = new THREE.Vector3().subVectors(avatarData.rPalm, currentRightPos).normalize();
-                rightSaberRef.current.lookAt(currentRightPos.clone().add(dir));
-                rightSaberRef.current.updateMatrixWorld(true);
-            }
-        } else {
-             const lw = lm[15]; const rw = lm[16];
-             currentLeftPos = mapTo3D(lw.x, lw.y, lw.z);
-             currentRightPos = mapTo3D(rw.x, rw.y, rw.z);
+        if (sceneRefs.current.leftSaber) {
+          sceneRefs.current.leftSaber.position.copy(currentLeftPos);
+          const dir = new THREE.Vector3().subVectors(avatarData.lPalm, currentLeftPos).normalize();
+          sceneRefs.current.leftSaber.lookAt(currentLeftPos.clone().add(dir));
+          sceneRefs.current.leftSaber.updateMatrixWorld(true);
         }
-        
-        // Update Trails (with scale)
-        updateTrail(leftTrailRef.current, leftTrailHistory, leftSaberRef.current, debugConfig.saberScale);
-        updateTrail(rightTrailRef.current, rightTrailHistory, rightSaberRef.current, debugConfig.saberScale);
-
-        // Velocity Calculation
-        leftVelocity.current = currentLeftPos.distanceTo(prevLeftPos.current) / dt;
-        rightVelocity.current = currentRightPos.distanceTo(prevRightPos.current) / dt;
-        
-        leftVelVector.current.subVectors(currentLeftPos, prevLeftPos.current).divideScalar(dt);
-        rightVelVector.current.subVectors(currentRightPos, prevRightPos.current).divideScalar(dt);
-
-        prevLeftPos.current.copy(currentLeftPos);
-        prevRightPos.current.copy(currentRightPos);
-
-        updateDebugVisuals(currentLeftPos, currentRightPos, currentLeftPos, currentRightPos);
-        
-        if (gameStatus === 'calibration') {
-            calibration.updateCalibration(dt, lm);
+        if (sceneRefs.current.rightSaber) {
+          sceneRefs.current.rightSaber.position.copy(currentRightPos);
+          const dir = new THREE.Vector3().subVectors(avatarData.rPalm, currentRightPos).normalize();
+          sceneRefs.current.rightSaber.lookAt(currentRightPos.clone().add(dir));
+          sceneRefs.current.rightSaber.updateMatrixWorld(true);
         }
+      }
+      
+      updateTrailUtil(sceneRefs.current.leftTrail, leftTrailHistory.current, sceneRefs.current.leftSaber, debugConfig.saberScale);
+      updateTrailUtil(sceneRefs.current.rightTrail, rightTrailHistory.current, sceneRefs.current.rightSaber, debugConfig.saberScale);
+
+      leftVelVector.current.subVectors(currentLeftPos, prevLeftPos.current).divideScalar(dt);
+      rightVelVector.current.subVectors(currentRightPos, prevRightPos.current).divideScalar(dt);
+
+      prevLeftPos.current.copy(currentLeftPos);
+      prevRightPos.current.copy(currentRightPos);
+      
+      if (gameStatus === 'calibration') {
+        calibration.updateCalibration(dt, lm);
+      }
     }
 
-    // --- Gameplay Loop ---
+    // Gameplay
     if (gameStatus === 'playing' && !isPaused && isGameActive.current) {
-        spawnBlock(time);
+      spawnBlock();
+      
+      if (beatmapCompleted.current) {
+        const activeBlocks = blocks.current.filter(b => !b.hit && !b.missed);
+        if (activeBlocks.length === 0 && gameOverDelayTimer.current === null) {
+          gameOverDelayTimer.current = window.setTimeout(() => {
+            onGameOver(stats.current.score);
+            setGameStatus('gameover');
+          }, 1000);
+        }
+      }
+
+      blocks.current.forEach(block => {
+        if (block.hit || block.missed) return;
+
+        block.position.z += blockSpeed * dt;
         
-        // Check if beatmap is completed and all blocks are processed
-        if (beatmapCompleted.current) {
-          const activeBlocks = blocks.current.filter(b => !b.hit && !b.missed);
-          if (activeBlocks.length === 0 && gameOverDelayTimer.current === null) {
-            // All blocks cleared, start 1 second delay before game over
-            gameOverDelayTimer.current = window.setTimeout(() => {
-              onGameOver(stats.current.score);
-              setGameStatus('gameover');
-            }, 1000);
+        const totalDist = 0 - GAME_CONFIG.SPAWN_Z;
+        const currentDist = block.position.z - GAME_CONFIG.SPAWN_Z;
+        const t = Math.max(0, currentDist / totalDist);
+
+        if (block.startPos && block.endPos) {
+          const newPos = new THREE.Vector3().lerpVectors(block.startPos, block.endPos, t);
+          block.position.x = newPos.x;
+          block.position.y = newPos.y;
+        }
+
+        const mesh = sceneRefs.current.blockMeshes.get(block.id);
+        if (mesh) {
+          mesh.position.set(block.position.x, block.position.y, block.position.z);
+          
+          const hitStartZ = GAME_CONFIG.HIT_Z + GAME_CONFIG.HIT_ZONE.FILL_START_OFFSET;
+          const spawnZ = GAME_CONFIG.SPAWN_Z;
+          
+          let fillProgress = (block.position.z - spawnZ) / (hitStartZ - spawnZ);
+          fillProgress = Math.max(0, Math.min(1, fillProgress));
+
+          const core = mesh.getObjectByName('core') as THREE.Mesh;
+          const wireframe = mesh.getObjectByName('wireframe') as THREE.LineSegments;
+          
+          if (core && wireframe) {
+            const coreMat = core.material as THREE.MeshBasicMaterial;
+            const wireMat = wireframe.material as THREE.LineDashedMaterial;
+            
+            coreMat.opacity = 0.1 + (fillProgress * 0.5);
+            wireMat.dashSize = fillProgress * GAME_CONFIG.BLOCK_SIZE;
+            wireMat.gapSize = GAME_CONFIG.BLOCK_SIZE - wireMat.dashSize;
+            wireMat.opacity = 0.5 + (fillProgress * 0.5);
           }
         }
 
-        // Update Track Flash Effects
-        trackLinesRef.current.forEach((line, idx) => {
-            const material = line.material as THREE.LineBasicMaterial;
-            const isFlashing = nextTrackFlash.current?.includes(idx) ?? false;
-            if (isFlashing) {
-                material.opacity = 0.8;
-                material.color.setHex(GAME_CONFIG.COLORS.WHITE);
-                material.linewidth = 2;
-            } else {
-                material.opacity = 0.2;
-                material.color.setHex(GAME_CONFIG.COLORS.GRAY);
-                material.linewidth = 1;
-            }
-            material.needsUpdate = true;
-        });
-
-        blocks.current.forEach(block => {
-            if (block.hit || block.missed) return;
-
-            // Move Block (Rail Logic) - Speed based on BPM
-            block.position.z += blockSpeed * dt;
-            
-            // Calculate progress (t) based on Z. 0 at Start, 1 at Target.
-            // Start: SPAWN_Z (-50). Target: 0.
-            const totalDist = 0 - GAME_CONFIG.SPAWN_Z;
-            const currentDist = block.position.z - GAME_CONFIG.SPAWN_Z;
-            const t = Math.max(0, currentDist / totalDist);
-
-            // Lerp Position
-            if (block.startPos && block.endPos) {
-                 const newPos = new THREE.Vector3().lerpVectors(block.startPos, block.endPos, t);
-                 block.position.x = newPos.x;
-                 block.position.y = newPos.y;
-            }
-
-            const mesh = blockMeshes.current.get(block.id);
-            if (mesh) {
-                mesh.position.set(block.position.x, block.position.y, block.position.z);
-                
-                // Visual Cues: Filling Wireframe
-                const hitStartZ = GAME_CONFIG.HIT_Z + GAME_CONFIG.HIT_ZONE.FILL_START_OFFSET; 
-                const spawnZ = GAME_CONFIG.SPAWN_Z; 
-                
-                let fillProgress = (block.position.z - spawnZ) / (hitStartZ - spawnZ);
-                fillProgress = Math.max(0, Math.min(1, fillProgress));
-
-                const core = mesh.getObjectByName('core') as THREE.Mesh;
-                const wireframe = mesh.getObjectByName('wireframe') as THREE.LineSegments;
-                
-                if (core && wireframe) {
-                    const coreMat = core.material as THREE.MeshBasicMaterial;
-                    const wireMat = wireframe.material as THREE.LineDashedMaterial; 
-                    
-                    coreMat.opacity = 0.1 + (fillProgress * 0.5);
-                    wireMat.dashSize = fillProgress * GAME_CONFIG.BLOCK_SIZE;
-                    wireMat.gapSize = GAME_CONFIG.BLOCK_SIZE - wireMat.dashSize;
-                    wireMat.opacity = 0.5 + (fillProgress * 0.5);
-                }
-            }
-
-            // Miss Logic
-            if (block.position.z > GAME_CONFIG.DESPAWN_Z) {
-                block.missed = true;
-                stats.current.combo = 0;
-                if (!debugConfig.godMode) {
-                    stats.current.health -= GAME_CONFIG.DAMAGE_PER_MISS;
-                }
-                playSound(150, 'sawtooth', 0.2);
-                if (mesh) {
-                    sceneRef.current?.remove(mesh);
-                    blockMeshes.current.delete(block.id);
-                }
-            }
-
-            // Hit Logic - Extended Z range for better hit detection
-            if (block.position.z > GAME_CONFIG.HIT_ZONE.MIN_Z && block.position.z < GAME_CONFIG.HIT_ZONE.MAX_Z && !block.hit) { 
-                let hitBy: 'left' | 'right' | null = null;
-                const blockCenter = new THREE.Vector3(block.position.x, block.position.y, block.position.z);
-                
-                // Check Left Saber with sweep detection
-                if (leftSaberRef.current) {
-                    if (checkBlockCollision(leftSaberRef.current, blockCenter, prevLeftBladePoints.current)) hitBy = 'left';
-                }
-                
-                // Check Right Saber (if not already hit by left)
-                if (!hitBy && rightSaberRef.current) {
-                    if (checkBlockCollision(rightSaberRef.current, blockCenter, prevRightBladePoints.current)) hitBy = 'right';
-                }
-
-                if (hitBy) {
-                    block.hit = true;
-                    const isWhite = block.type === 'both';
-                    const isLeftMatch = hitBy === 'left' && (block.type === 'left' || isWhite);
-                    const isRightMatch = hitBy === 'right' && (block.type === 'right' || isWhite);
-                    
-                    let debrisColor = GAME_CONFIG.COLORS.WHITE;
-                    if (block.type === 'left') debrisColor = GAME_CONFIG.COLORS.CYAN;
-                    if (block.type === 'right') debrisColor = GAME_CONFIG.COLORS.MAGENTA;
-
-                    if (isLeftMatch || isRightMatch) {
-                        // Good Hit
-                        stats.current.score += 100 + (stats.current.combo * 10);
-                        stats.current.combo++;
-                        stats.current.maxCombo = Math.max(stats.current.maxCombo, stats.current.combo);
-                        stats.current.health = Math.min(100, stats.current.health + GAME_CONFIG.HEAL_PER_HIT);
-                        playSlashSound(isLeftMatch ? 1.0 : 1.2); 
-                        triggerImpact(debrisColor);
-                    } else {
-                        // Bad Color Hit
-                        stats.current.combo = 0; // Combo Breaker
-                        playSound(100, 'square', 0.1);
-                    }
-                    
-                    const saberVel = hitBy === 'left' ? leftVelVector.current : rightVelVector.current;
-                    createDebris(blockCenter, debrisColor, saberVel);
-                    createExplosion(blockCenter, debrisColor);
-                    createSlashEffect(blockCenter, debrisColor, saberVel);
-
-                    if (mesh) {
-                        sceneRef.current?.remove(mesh);
-                        blockMeshes.current.delete(block.id);
-                    }
-                }
-            }
-        });
-
-        blocks.current = blocks.current.filter(b => !b.hit && !b.missed);
-
-        // Only check health death after countdown is complete
-        if (stats.current.health <= 0 && isGameActive.current) {
-            setGameStatus('gameover');
-            onGameOver(stats.current.score);
+        // Miss
+        if (block.position.z > GAME_CONFIG.DESPAWN_Z) {
+          block.missed = true;
+          stats.current.combo = 0;
+          if (!debugConfig.godMode) {
+            stats.current.health -= GAME_CONFIG.DAMAGE_PER_MISS;
+          }
+          audio.playSound(150, 'sawtooth', 0.2);
+          if (mesh) {
+            sceneRefs.current.scene?.remove(mesh);
+            sceneRefs.current.blockMeshes.delete(block.id);
+          }
         }
-    } else if (isPaused) {
-        // Paused state
+
+        // Hit
+        if (block.position.z > GAME_CONFIG.HIT_ZONE.MIN_Z && block.position.z < GAME_CONFIG.HIT_ZONE.MAX_Z && !block.hit) {
+          let hitBy: 'left' | 'right' | null = null;
+          const blockCenter = new THREE.Vector3(block.position.x, block.position.y, block.position.z);
+          
+          if (sceneRefs.current.leftSaber) {
+            if (checkBlockCollisionUtil(sceneRefs.current.leftSaber, blockCenter, prevLeftBladePoints.current, debugConfig.blockScale, debugConfig.saberScale)) {
+              hitBy = 'left';
+            }
+          }
+          
+          if (!hitBy && sceneRefs.current.rightSaber) {
+            if (checkBlockCollisionUtil(sceneRefs.current.rightSaber, blockCenter, prevRightBladePoints.current, debugConfig.blockScale, debugConfig.saberScale)) {
+              hitBy = 'right';
+            }
+          }
+
+          if (hitBy) {
+            block.hit = true;
+            const isWhite = block.type === 'both';
+            const isLeftMatch = hitBy === 'left' && (block.type === 'left' || isWhite);
+            const isRightMatch = hitBy === 'right' && (block.type === 'right' || isWhite);
+            
+            let debrisColor = GAME_CONFIG.COLORS.WHITE;
+            if (block.type === 'left') debrisColor = GAME_CONFIG.COLORS.CYAN;
+            if (block.type === 'right') debrisColor = GAME_CONFIG.COLORS.MAGENTA;
+
+            if (isLeftMatch || isRightMatch) {
+              stats.current.score += 100 + (stats.current.combo * 10);
+              stats.current.combo++;
+              stats.current.maxCombo = Math.max(stats.current.maxCombo, stats.current.combo);
+              stats.current.health = Math.min(100, stats.current.health + GAME_CONFIG.HEAL_PER_HIT);
+              audio.playSlashSound(isLeftMatch ? 1.0 : 1.2);
+              triggerImpact(debrisColor);
+            } else {
+              stats.current.combo = 0;
+              audio.playSound(100, 'square', 0.1);
+            }
+            
+            const saberVel = hitBy === 'left' ? leftVelVector.current : rightVelVector.current;
+            createDebrisUtil(blockCenter, debrisColor, saberVel, sceneRefs.current.debrisMeshes!);
+            createExplosionUtil(blockCenter, debrisColor, getEffectRefs());
+            createSlashEffectUtil(blockCenter, debrisColor, saberVel, getEffectRefs());
+
+            if (mesh) {
+              sceneRefs.current.scene?.remove(mesh);
+              sceneRefs.current.blockMeshes.delete(block.id);
+            }
+          }
+        }
+      });
+
+      blocks.current = blocks.current.filter(b => !b.hit && !b.missed);
+
+      if (stats.current.health <= 0 && isGameActive.current) {
+        setGameStatus('gameover');
+        onGameOver(stats.current.score);
+      }
     }
 
-    // --- Update Particles (Sparks) ---
-    if (particleMeshes.current && !isPaused) {
-        updateParticles(particleMeshes.current, dt);
-    }
-
-    // --- Update Shockwaves ---
-    if (shockwaveMeshes.current && !isPaused) {
-        updateShockwaves(shockwaveMeshes.current, dt);
-    }
-
-    // --- Update Slash Effects ---
-    if (slashEffects.current && !isPaused) {
-        updateSlashEffects(slashEffects.current, dt);
-    }
-
-    // --- Update Debris (Block Pieces) ---
-    if (debrisMeshes.current && !isPaused) {
-        updateDebris(debrisMeshes.current, dt);
+    // Update effects
+    if (!isPaused) {
+      if (sceneRefs.current.particleMeshes) updateParticles(sceneRefs.current.particleMeshes, dt);
+      if (sceneRefs.current.shockwaveMeshes) updateShockwaves(sceneRefs.current.shockwaveMeshes, dt);
+      if (sceneRefs.current.slashEffects) updateSlashEffects(sceneRefs.current.slashEffects, dt);
+      if (sceneRefs.current.debrisMeshes) updateDebris(sceneRefs.current.debrisMeshes, dt);
     }
     
-    // --- Update Previous Blade Points for Sweep Detection (with scale) ---
-    if (leftSaberRef.current) {
-        prevLeftBladePoints.current = getSaberBladePoints(leftSaberRef.current, debugConfig.saberScale);
+    // Update blade points for sweep detection
+    if (sceneRefs.current.leftSaber) {
+      prevLeftBladePoints.current = getSaberBladePoints(sceneRefs.current.leftSaber, debugConfig.saberScale);
     }
-    if (rightSaberRef.current) {
-        prevRightBladePoints.current = getSaberBladePoints(rightSaberRef.current, debugConfig.saberScale);
+    if (sceneRefs.current.rightSaber) {
+      prevRightBladePoints.current = getSaberBladePoints(sceneRefs.current.rightSaber, debugConfig.saberScale);
     }
-  };
+  }, [gameStatus, isPaused, debugConfig, calibration, audio, blockSpeed, stats, isGameActive, onGameOver, setGameStatus, beatmap]);
 
+  // Render loop
   const renderLoop = useCallback((time: number) => {
     update(time);
-    if (rendererRef.current && sceneRef.current && cameraRef.current) {
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-    }
+    threeScene.render();
     requestRef.current = requestAnimationFrame(renderLoop);
-  }, [gameStatus, debugConfig, calibration.calibrationLeft, calibration.calibrationRight, isPaused]); 
+  }, [update, threeScene]);
 
-  // --- Effects ---
-
+  // Effects
   useEffect(() => {
-    initThree();
-    const handleResize = () => {
-        if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        cameraRef.current.aspect = w / h;
-        cameraRef.current.updateProjectionMatrix();
-        rendererRef.current.setSize(w, h);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => {
-        window.removeEventListener('resize', handleResize);
-        if (gameOverDelayTimer.current !== null) {
-            clearTimeout(gameOverDelayTimer.current);
-            gameOverDelayTimer.current = null;
-        }
-        if (rendererRef.current && containerRef.current) {
-            containerRef.current.removeChild(rendererRef.current.domElement);
-            rendererRef.current.dispose();
-        }
-    };
-  }, []);
+    if (sceneRefs.current.leftSaber) sceneRefs.current.leftSaber.scale.setScalar(debugConfig.saberScale);
+    if (sceneRefs.current.rightSaber) sceneRefs.current.rightSaber.scale.setScalar(debugConfig.saberScale);
+    if (sceneRefs.current.avatarGroup) sceneRefs.current.avatarGroup.visible = debugConfig.showAvatar;
+    if (sceneRefs.current.leftTrail) sceneRefs.current.leftTrail.visible = debugConfig.showTrail;
+    if (sceneRefs.current.rightTrail) sceneRefs.current.rightTrail.visible = debugConfig.showTrail;
+    
+    sceneRefs.current.blockMeshes.forEach((mesh) => {
+      mesh.scale.setScalar(debugConfig.blockScale);
+    });
+  }, [debugConfig, sceneRefs]);
 
-  // Separate effect for initializing the game logic when status changes to playing
+  // Track previous game status to detect transition to 'playing'
+  const prevGameStatus = useRef(gameStatus);
+  
   useEffect(() => {
-      if (gameStatus === 'playing') {
-          initGame();
-      }
+    // Only init game when transitioning TO 'playing' status
+    if (gameStatus === 'playing' && prevGameStatus.current !== 'playing') {
+      initGame();
+    }
+    prevGameStatus.current = gameStatus;
   }, [gameStatus, initGame]);
 
-  // Effect for the render loop
   useEffect(() => {
     if (gameStatus === 'playing' || gameStatus === 'calibration') {
-        // Initialize audio using hook
-        audio.initAudio();
-
-        requestRef.current = requestAnimationFrame(renderLoop);
+      audio.initAudio();
+      requestRef.current = requestAnimationFrame(renderLoop);
     } else {
-        if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
     }
     return () => {
-        if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [gameStatus, renderLoop, audio]);
 
+  // Pose tracking
   const onResults = useCallback((results: Results) => {
     if (results.poseLandmarks) {
-        rawLandmarks.current = results.poseLandmarks;
+      rawLandmarks.current = results.poseLandmarks;
     }
   }, []);
 
   useEffect(() => {
     const startPose = async () => {
-        try {
-            const service = new PoseService(onResults);
-            await service.initialize();
-            poseService.current = service;
-            if (videoRef.current) {
-                await service.start(videoRef.current);
-                setGameStatus((prev: any) => (prev === 'loading' ? 'menu' : prev));
-            }
-        } catch (e) {
-            console.error(e);
-            setPermissionError("Camera access failed.");
+      try {
+        const service = new PoseService(onResults);
+        await service.initialize();
+        poseService.current = service;
+        if (videoRef.current) {
+          await service.start(videoRef.current);
+          setGameStatus((prev: any) => (prev === 'loading' ? 'menu' : prev));
         }
+      } catch (e) {
+        console.error(e);
+        permissionError.current = "Camera access failed.";
+      }
     };
     if (videoRef.current) startPose();
     return () => poseService.current?.stop();
-  }, []);
+  }, [onResults, setGameStatus]);
 
-  // Mute toggle now uses hook
-  const toggleMute = audio.toggleMute;
-
-  // YouTube player control functions
-  const pauseYouTube = () => {
-    if (youtubePlayerRef.current?.contentWindow) {
-      youtubePlayerRef.current.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*'
-      );
-    }
-  };
-  
-  const playYouTube = () => {
-    if (youtubePlayerRef.current?.contentWindow) {
-      youtubePlayerRef.current.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func: 'playVideo' }), '*'
-      );
-    }
-  };
-  
-  const restartYouTube = () => {
-    if (youtubePlayerRef.current?.contentWindow) {
-      // Seek to beginning and pause, will auto-play when countdown ends
-      youtubePlayerRef.current.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), '*'
-      );
-      youtubePlayerRef.current.contentWindow.postMessage(
-        JSON.stringify({ event: 'command', func: 'pauseVideo' }), '*'
-      );
-    }
-  };
-
-  // Handle Pause
-  const handlePause = () => {
-    setIsPaused(true);
-    pauseYouTube();
-  };
-  const handleResume = () => {
-      setIsPaused(false);
-      startCountdown(); // Resume with countdown, YouTube will play when countdown ends
-  };
-  const handleExit = () => {
-      setGameStatus('menu');
-  }
-  
-  const handleRetry = () => {
-    setIsPaused(false);
-    restartYouTube();
-    initGame();
-  };
-
-  // Keyboard shortcut for pause (ESC)
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && gameStatus === 'playing') {
@@ -967,172 +573,102 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameStatus, isPaused]);
-  
-  // Play YouTube when countdown ends (countdown becomes null and game is active)
+
+  // YouTube sync
   useEffect(() => {
     if (countdown === null && isGameActive.current && !isPaused && beatmap.youtubeId) {
-      playYouTube();
+      youtube.playYouTube();
     }
-  }, [countdown, isPaused, beatmap.youtubeId]);
+  }, [countdown, isPaused, beatmap.youtubeId, youtube, isGameActive]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (gameOverDelayTimer.current !== null) {
+        clearTimeout(gameOverDelayTimer.current);
+        gameOverDelayTimer.current = null;
+      }
+    };
+  }, []);
+
+  // Handlers
+  const handlePause = () => {
+    setIsPaused(true);
+    youtube.pauseYouTube();
+  };
+
+  const handleResume = () => {
+    setIsPaused(false);
+    // Reset lastUpdateTime to prevent large dt on resume
+    lastUpdateTime.current = performance.now();
+    startCountdown();
+  };
+
+  const handleRetry = () => {
+    setIsPaused(false);
+    youtube.restartYouTube();
+    initGame();
+  };
+
+  const handleExit = () => {
+    setGameStatus('menu');
+  };
 
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
-      {/* Video is hidden (opacity-0) but still active for processing */}
       <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none" playsInline muted />
       <div ref={containerRef} className="absolute inset-0 z-10" />
       
-      {/* Screen Flash Overlay */}
       <div ref={flashRef} className="absolute inset-0 z-30 pointer-events-none opacity-0 transition-opacity duration-75 ease-out mix-blend-add"></div>
 
-      {/* Debug Menu */}
       <DebugMenu 
         config={debugConfig} 
         onConfigChange={setDebugConfig} 
         onRecalibrate={() => {
-            setIsDebugOpen(false);
-            onRecalibrateRequest();
+          setIsDebugOpen(false);
+          onRecalibrateRequest();
         }}
         isOpen={isDebugOpen}
         setIsOpen={setIsDebugOpen}
       />
 
-      {/* Calibration Overlay */}
       {gameStatus === 'calibration' && (
-          <CalibrationOverlay 
-            leftProgress={calibration.calibrationLeft}
-            rightProgress={calibration.calibrationRight}
-            isComplete={calibration.calibrationComplete}
-          />
+        <CalibrationOverlay 
+          leftProgress={calibration.calibrationLeft}
+          rightProgress={calibration.calibrationRight}
+          isComplete={calibration.calibrationComplete}
+        />
       )}
 
-      {/* Countdown Overlay */}
-      {countdown !== null && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/20">
-            <span className="text-[10px] sm:text-[10rem] font-black text-white animate-ping drop-shadow-[0_0_20px_#00f3ff]">
-                {countdown}
-            </span>
-        </div>
-      )}
+      {countdown !== null && <CountdownOverlay countdown={countdown} />}
 
-      {/* Pause Menu Overlay */}
       {isPaused && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-              <div className="flex flex-col gap-4 min-w-[300px]">
-                  <h2 className="text-3xl font-black text-center text-white italic mb-4">PAUSED</h2>
-                  
-                  <button onClick={handleResume} className="flex items-center justify-center gap-2 px-6 py-4 bg-[#00f3ff] text-black font-bold uppercase hover:bg-white transition-colors">
-                      <Play size={20} fill="currentColor" /> Resume
-                  </button>
-                  
-                  <button onClick={handleRetry} className="flex items-center justify-center gap-2 px-6 py-4 border border-[#00f3ff] text-[#00f3ff] font-bold uppercase hover:bg-[#00f3ff]/20 transition-colors">
-                      <RotateCcw size={20} /> Retry
-                  </button>
-                  
-                  <button onClick={handleExit} className="flex items-center justify-center gap-2 px-6 py-4 border border-gray-600 text-gray-300 font-bold uppercase hover:bg-white/10 transition-colors">
-                      <Home size={20} /> Exit to Menu
-                  </button>
-              </div>
-          </div>
+        <PauseMenu 
+          onResume={handleResume}
+          onRetry={handleRetry}
+          onExit={handleExit}
+        />
       )}
 
-      {/* HUD */}
-      {gameStatus === 'playing' && (
-        <div className="absolute top-0 left-0 w-full p-8 flex justify-between items-start z-20 pointer-events-none">
-          {/* Spacer for Debug Menu on Left */}
-          <div className="w-16"></div> 
-          
-          <div className="flex flex-col items-center">
-            <span className="text-gray-400 text-xs font-mono uppercase tracking-widest">Score</span>
-            <span className="text-4xl font-black text-white italic tracking-tighter" style={{ textShadow: '0 0 20px rgba(255,255,255,0.5)' }}>
-              <ScoreDisplay statsRef={stats} />
-            </span>
-          </div>
+      {gameStatus === 'playing' && <GameHUD statsRef={stats} />}
 
-          <div className="flex flex-col items-end">
-            <span className="text-gray-400 text-xs font-mono uppercase tracking-widest">Combo</span>
-            <span className="text-6xl font-black text-[#00f3ff] italic" style={{ textShadow: '0 0 20px cyan' }}>
-              <ComboDisplay statsRef={stats} />
-            </span>
-          </div>
-           {/* Health Bar */}
-           <div className="absolute bottom-10 left-1/2 transform -translate-x-1/2 w-1/2 h-1 bg-gray-800 rounded overflow-hidden">
-                <HealthBar statsRef={stats} />
-           </div>
-        </div>
-      )}
+      <ControlButtons 
+        gameStatus={gameStatus}
+        isPaused={isPaused}
+        isMuted={audio.isMuted}
+        onPause={handlePause}
+        onToggleMute={audio.toggleMute}
+      />
 
-      {/* Top Right Control Buttons */}
-      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
-        {/* Pause Button */}
-        {gameStatus === 'playing' && !isPaused && (
-          <button 
-              onClick={handlePause}
-              className="p-2 bg-gray-900/50 border border-gray-700 rounded-full text-white/50 hover:text-white hover:bg-white hover:text-black transition-all hover:scale-110"
-          >
-              <Pause size={20} fill="currentColor" />
-          </button>
-        )}
-        
-        {/* Mute Button */}
-        <button onClick={toggleMute} className="text-white/50 hover:text-white transition-colors">
-          {audio.isMuted ? <VolumeX /> : <Volume2 />}
-        </button>
-      </div>
-
-      {/* Camera Preview Window */}
       {debugConfig.showCameraPreview && (
-          <div className="absolute bottom-4 right-4 z-40 rounded-lg overflow-hidden border-2 border-gray-700 shadow-xl bg-black">
-              <div className="relative">
-                  <canvas 
-                      ref={cameraPreview.cameraPreviewRef}
-                      width={GAME_CONFIG.CAMERA_PREVIEW.WIDTH}
-                      height={GAME_CONFIG.CAMERA_PREVIEW.HEIGHT}
-                      className="block"
-                  />
-                  <div className="absolute top-1 left-1 px-2 py-0.5 bg-black/70 rounded text-[10px] font-mono text-gray-400 uppercase">
-                      Camera
-                  </div>
-                  <div className="absolute bottom-1 left-1 flex gap-2">
-                      <span className="px-1.5 py-0.5 bg-[#00f3ff]/30 rounded text-[8px] font-mono text-[#00f3ff]">L</span>
-                      <span className="px-1.5 py-0.5 bg-[#ff00ff]/30 rounded text-[8px] font-mono text-[#ff00ff]">R</span>
-                  </div>
-              </div>
-          </div>
+        <CameraPreview cameraPreviewRef={cameraPreview.cameraPreviewRef} />
       )}
 
-      {/* YouTube Video Player - Bottom Left */}
       {gameStatus === 'playing' && beatmap.youtubeId && (
-          <div className="absolute bottom-4 left-4 z-40 rounded-lg overflow-hidden border-2 border-gray-700 shadow-xl bg-black">
-              <div className="relative">
-                  <iframe
-                      ref={youtubePlayerRef}
-                      id="youtube-player"
-                      width="280"
-                      height="158"
-                      src={`https://www.youtube.com/embed/${beatmap.youtubeId}?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1`}
-                      title={beatmap.title}
-                      frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      referrerPolicy="strict-origin-when-cross-origin"
-                      allowFullScreen
-                      className="block"
-                  />
-              </div>
-              <div className="px-3 py-2 bg-gradient-to-r from-gray-900 to-black">
-                  <div className="text-xs font-bold text-white truncate">♫ {beatmap.title}</div>
-                  <div className="text-[10px] text-gray-400 truncate">{beatmap.artist}</div>
-              </div>
-          </div>
+        <YouTubePlayer beatmap={beatmap} youtubePlayerRef={youtube.youtubePlayerRef} />
       )}
 
-      {permissionError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black text-white z-50">
-             <div className="text-center text-red-500">
-                <AlertTriangle size={48} className="mx-auto mb-4" />
-                <p>{permissionError}</p>
-             </div>
-          </div>
-      )}
+      {permissionError.current && <ErrorOverlay message={permissionError.current} />}
     </div>
   );
 };

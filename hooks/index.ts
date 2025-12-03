@@ -11,3 +11,12 @@ export { useCalibration } from './useCalibration';
 export type { CalibrationAPI } from './useCalibration';
 
 export { useBeatmaps } from './useBeatmaps';
+
+export { useThreeScene } from './useThreeScene';
+export type { ThreeSceneRefs, UseThreeSceneReturn } from './useThreeScene';
+
+export { useYouTubePlayer } from './useYouTubePlayer';
+export type { UseYouTubePlayerReturn } from './useYouTubePlayer';
+
+export { usePoseTracking } from './usePoseTracking';
+export type { UsePoseTrackingReturn } from './usePoseTracking';
