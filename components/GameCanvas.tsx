@@ -119,6 +119,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const secondsPerBeat = 60 / beatmap.bpm;
   const blockSpeed = travelDistance / secondsPerBeat;
   
+  // Time for block to travel from spawn to hit zone (in ms)
+  const blockTravelTime = (travelDistance / blockSpeed) * 1000;
+  
   // Start delay: use beatmap's startDelay or default
   const startDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
 
@@ -270,7 +273,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
     const totalBeats = getTotalBeats();
     
-    const effectiveGameTime = gameTime - startDelay;
+    // Add blockTravelTime to spawn blocks early so they arrive at HIT_Z on the beat
+    const effectiveGameTime = gameTime - startDelay + blockTravelTime;
     const currentBeatIndex = Math.max(0, Math.floor(effectiveGameTime / beatInterval));
     const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
     
@@ -290,9 +294,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const beatsAhead = beatIndex - currentBeatIndex;
       
       if (Array.isArray(beatData)) {
-        for (const item of beatData) {
-          const note = parseBeatNote(item);
-          spawnSingleBlock(note, gameTime, beatsAhead);
+        // Offset multi-notes evenly within the beat (2 notes = 1/2, 3 notes = 1/3, etc.)
+        const subBeatOffset = 1 / beatData.length;
+        for (let i = 0; i < beatData.length; i++) {
+          const note = parseBeatNote(beatData[i]);
+          spawnSingleBlock(note, gameTime, beatsAhead + (i * subBeatOffset));
         }
       } else {
         const note = parseBeatNote(beatData);
