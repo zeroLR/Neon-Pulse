@@ -117,6 +117,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const blocks = useRef<any[]>([]);
   const lastTime = useRef<number>(0);
   const nextSpawnTime = useRef<number>(0);
+  const gameStartTime = useRef<number>(0); // Track when game started for relative time
   const beatmapCompleted = useRef<boolean>(false);
   const gameOverDelayTimer = useRef<number | null>(null);
   const spawnedBeatIndex = useRef<number>(0); // Track which beats have been spawned
@@ -285,8 +286,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const initGame = useCallback(() => {
     blocks.current = [];
     gameState.resetStats();
-    lastTime.current = performance.now();
-    nextSpawnTime.current = performance.now() + GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    const now = performance.now();
+    lastTime.current = now;
+    gameStartTime.current = now; // Record game start time
+    nextSpawnTime.current = now + GAME_CONFIG.INITIAL_SPAWN_DELAY;
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
@@ -295,6 +298,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     currentMeasure.current = 0;
     currentBeat.current = 0;
     beatmapCompleted.current = false;
+    spawnedBeatIndex.current = 0; // Reset spawned beat index for retry
     if (gameOverDelayTimer.current !== null) {
       clearTimeout(gameOverDelayTimer.current);
       gameOverDelayTimer.current = null;
@@ -494,9 +498,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
     const totalBeats = getTotalBeats();
     
-    // Calculate which beat should be hitting now
-    const gameTime = time - GAME_CONFIG.INITIAL_SPAWN_DELAY;
-    const currentBeatIndex = Math.floor(gameTime / beatInterval);
+    // Calculate which beat should be hitting now (using relative time from game start)
+    const gameTime = time - gameStartTime.current - GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    const currentBeatIndex = Math.max(0, Math.floor(gameTime / beatInterval));
     
     // Spawn all beats up to lookahead ahead that haven't been spawned yet
     const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
@@ -776,7 +780,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         blocks.current = blocks.current.filter(b => !b.hit && !b.missed);
 
-        if (stats.current.health <= 0) {
+        // Only check health death after countdown is complete
+        if (stats.current.health <= 0 && isGameActive.current) {
             setGameStatus('gameover');
             onGameOver(stats.current.score);
         }
