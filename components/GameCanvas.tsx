@@ -239,10 +239,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Sabers
     const lSaber = createSaberMesh(GAME_CONFIG.COLORS.CYAN);
+    lSaber.scale.setScalar(GAME_CONFIG.DEFAULT_SABER_SCALE);
     scene.add(lSaber);
     leftSaberRef.current = lSaber;
 
     const rSaber = createSaberMesh(GAME_CONFIG.COLORS.MAGENTA);
+    rSaber.scale.setScalar(GAME_CONFIG.DEFAULT_SABER_SCALE);
     scene.add(rSaber);
     rightSaberRef.current = rSaber;
 
@@ -1115,9 +1117,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                       allowFullScreen
                       className="block"
                   />
-                  <div className="absolute top-1 right-1 px-2 py-0.5 bg-black/70 rounded text-[10px] font-mono text-[#00f3ff] uppercase">
-                      ♫ {beatmap.artist}
-                  </div>
+              </div>
+              <div className="px-3 py-2 bg-gradient-to-r from-gray-900 to-black">
+                  <div className="text-xs font-bold text-white truncate">♫ {beatmap.title}</div>
+                  <div className="text-[10px] text-gray-400 truncate">{beatmap.artist}</div>
               </div>
           </div>
       )}
