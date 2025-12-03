@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Play, Music, Clock, Zap, Target, Upload, Download, Trash2, Loader2, Plus, Edit } from 'lucide-react';
+import { ChevronLeft, Play, Music, Clock, Zap, Target, Upload, Download, Trash2, Loader2, Plus, Edit, Search, X, Filter } from 'lucide-react';
 import { Beatmap, BeatmapDifficulty } from '../types';
 import { useBeatmaps } from '../hooks';
 
@@ -23,10 +23,22 @@ const DIFFICULTY_BG: Record<BeatmapDifficulty, string> = {
   expert: 'bg-red-400/20',
 };
 
+const DIFFICULTY_GLOW: Record<BeatmapDifficulty, string> = {
+  easy: 'shadow-green-400/30',
+  normal: 'shadow-blue-400/30',
+  hard: 'shadow-orange-400/30',
+  expert: 'shadow-red-400/30',
+};
+
+type FilterType = 'all' | 'built-in' | 'custom';
+
 const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onBack, onOpenEditor }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<FilterType>('all');
+  const [showFilters, setShowFilters] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const { 
@@ -38,20 +50,23 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
     isCustomBeatmap 
   } = useBeatmaps();
 
-  const selectedBeatmap = beatmaps[selectedIndex] || beatmaps[0];
+  // Filter beatmaps based on search and filter type
+  const filteredBeatmaps = beatmaps.filter(beatmap => {
+    const matchesSearch = searchQuery === '' || 
+      beatmap.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      beatmap.artist.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesFilter = filterType === 'all' ||
+      (filterType === 'custom' && isCustomBeatmap(beatmap.id)) ||
+      (filterType === 'built-in' && !isCustomBeatmap(beatmap.id));
+    
+    return matchesSearch && matchesFilter;
+  });
 
-  const handlePrev = () => {
-    setSelectedIndex((prev) => (prev - 1 + beatmaps.length) % beatmaps.length);
-  };
+  const selectedBeatmap = filteredBeatmaps[selectedIndex] || filteredBeatmaps[0];
 
-  const handleNext = () => {
-    setSelectedIndex((prev) => (prev + 1) % beatmaps.length);
-  };
-
-  const handleSelect = () => {
-    if (selectedBeatmap) {
-      onSelect(selectedBeatmap);
-    }
+  const handleSelect = (beatmap: Beatmap) => {
+    onSelect(beatmap);
   };
 
   const handleImportClick = () => {
@@ -67,34 +82,31 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
 
     try {
       await importBeatmap(file);
-      // Select the newly imported beatmap (it will be at the end)
-      setSelectedIndex(beatmaps.length); // Will point to new beatmap after refresh
+      setSelectedIndex(beatmaps.length);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to import beatmap');
     } finally {
       setIsImporting(false);
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
   };
 
-  const handleExport = () => {
-    if (selectedBeatmap) {
-      exportBeatmap(selectedBeatmap);
-    }
+  const handleExport = (beatmap: Beatmap, e: React.MouseEvent) => {
+    e.stopPropagation();
+    exportBeatmap(beatmap);
   };
 
-  const handleDelete = async () => {
-    if (!selectedBeatmap || !isCustomBeatmap(selectedBeatmap.id)) return;
+  const handleDelete = async (beatmap: Beatmap, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isCustomBeatmap(beatmap.id)) return;
     
-    if (confirm(`Delete "${selectedBeatmap.title}"?`)) {
+    if (confirm(`Delete "${beatmap.title}"?`)) {
       try {
-        await deleteBeatmap(selectedBeatmap.id);
-        // Adjust selected index if needed
-        if (selectedIndex >= beatmaps.length - 1) {
-          setSelectedIndex(Math.max(0, beatmaps.length - 2));
+        await deleteBeatmap(beatmap.id);
+        if (selectedIndex >= filteredBeatmaps.length - 1) {
+          setSelectedIndex(Math.max(0, filteredBeatmaps.length - 2));
         }
       } catch (err) {
         setImportError(err instanceof Error ? err.message : 'Failed to delete beatmap');
@@ -102,17 +114,30 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
     }
   };
 
+  const handleEdit = (beatmap: Beatmap, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onOpenEditor?.(beatmap);
+  };
+
   // Keyboard navigation
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') handlePrev();
-      if (e.key === 'ArrowRight') handleNext();
-      if (e.key === 'Enter') handleSelect();
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex(prev => Math.max(0, prev - 1));
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex(prev => Math.min(filteredBeatmaps.length - 1, prev + 1));
+      }
+      if (e.key === 'Enter' && selectedBeatmap) {
+        handleSelect(selectedBeatmap);
+      }
       if (e.key === 'Escape') onBack();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIndex, beatmaps.length]);
+  }, [selectedIndex, filteredBeatmaps.length, selectedBeatmap]);
 
   if (isLoading) {
     return (
@@ -123,7 +148,7 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/95 text-white backdrop-blur-sm">
+    <div className="absolute inset-0 z-50 flex flex-col bg-black/95 text-white backdrop-blur-sm">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
@@ -134,219 +159,353 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
       />
 
       {/* Header */}
-      <div className="absolute top-8 left-8">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors font-mono text-sm uppercase tracking-wider"
-        >
-          <ChevronLeft size={20} /> Back to Menu
-        </button>
-      </div>
-
-      {/* Import/Export/Create Buttons */}
-      <div className="absolute top-8 right-8 flex gap-2">
-        {onOpenEditor && (
+      <div className="flex-shrink-0 px-4 md:px-8 py-4 md:py-6 border-b border-gray-800">
+        <div className="flex items-center justify-between mb-4 md:mb-6">
           <button
-            onClick={() => onOpenEditor()}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#00f3ff]/20 to-[#ff00ff]/20 border border-[#00f3ff] rounded-lg text-[#00f3ff] hover:text-white hover:border-white transition-colors font-mono text-sm"
+            onClick={onBack}
+            className="flex items-center gap-1 md:gap-2 text-gray-400 hover:text-white transition-colors font-mono text-xs md:text-sm uppercase tracking-wider"
           >
-            <Plus size={16} />
-            Create New
+            <ChevronLeft size={20} /> 
+            <span className="hidden sm:inline">Back to Menu</span>
+            <span className="sm:hidden">Back</span>
           </button>
+          
+          <h1 className="text-xl md:text-3xl font-black italic tracking-tight">
+            <span className="text-[#00f3ff]">SELECT</span>
+            <span className="text-white mx-1 md:mx-2">/</span>
+            <span className="text-[#ff00ff]">BEATMAP</span>
+          </h1>
+          
+          {/* Desktop Action Buttons */}
+          <div className="hidden md:flex gap-2">
+            {onOpenEditor && (
+              <button
+                onClick={() => onOpenEditor()}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#00f3ff]/20 to-[#ff00ff]/20 border border-[#00f3ff] rounded-lg text-[#00f3ff] hover:text-white hover:border-white transition-colors font-mono text-sm"
+              >
+                <Plus size={16} />
+                Create
+              </button>
+            )}
+            <button
+              onClick={handleImportClick}
+              disabled={isImporting}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-gray-300 hover:text-white hover:border-[#00f3ff] transition-colors font-mono text-sm"
+            >
+              {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+              Import
+            </button>
+          </div>
+          
+          {/* Mobile placeholder for layout balance */}
+          <div className="md:hidden w-12"></div>
+        </div>
+        
+        {/* Search and Filter Bar */}
+        <div className="flex gap-2 md:gap-4">
+          {/* Search Input */}
+          <div className="flex-1 relative">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setSelectedIndex(0); }}
+              placeholder="Search by title or artist..."
+              className="w-full pl-10 pr-10 py-2.5 md:py-3 bg-gray-900 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-[#00f3ff] transition-colors font-mono text-sm"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); setSelectedIndex(0); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+          
+          {/* Filter Button (Mobile) */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`md:hidden p-2.5 rounded-xl border transition-colors ${
+              filterType !== 'all' ? 'bg-[#00f3ff]/20 border-[#00f3ff] text-[#00f3ff]' : 'bg-gray-900 border-gray-700 text-gray-400'
+            }`}
+          >
+            <Filter size={20} />
+          </button>
+          
+          {/* Filter Tabs (Desktop) */}
+          <div className="hidden md:flex bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
+            {(['all', 'built-in', 'custom'] as FilterType[]).map((type) => (
+              <button
+                key={type}
+                onClick={() => { setFilterType(type); setSelectedIndex(0); }}
+                className={`px-4 py-2.5 font-mono text-sm capitalize transition-colors ${
+                  filterType === type 
+                    ? 'bg-gradient-to-r from-[#00f3ff]/30 to-[#ff00ff]/30 text-white' 
+                    : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+          
+          {/* Mobile Action Buttons */}
+          <div className="flex md:hidden gap-2">
+            {onOpenEditor && (
+              <button
+                onClick={() => onOpenEditor()}
+                className="p-2.5 bg-gradient-to-r from-[#00f3ff]/20 to-[#ff00ff]/20 border border-[#00f3ff] rounded-xl text-[#00f3ff]"
+              >
+                <Plus size={20} />
+              </button>
+            )}
+            <button
+              onClick={handleImportClick}
+              disabled={isImporting}
+              className="p-2.5 bg-gray-900 border border-gray-700 rounded-xl text-gray-400"
+            >
+              {isImporting ? <Loader2 size={20} className="animate-spin" /> : <Upload size={20} />}
+            </button>
+          </div>
+        </div>
+        
+        {/* Mobile Filter Dropdown */}
+        {showFilters && (
+          <div className="md:hidden flex gap-2 mt-3">
+            {(['all', 'built-in', 'custom'] as FilterType[]).map((type) => (
+              <button
+                key={type}
+                onClick={() => { setFilterType(type); setSelectedIndex(0); setShowFilters(false); }}
+                className={`flex-1 px-3 py-2 rounded-lg font-mono text-xs capitalize transition-colors ${
+                  filterType === type 
+                    ? 'bg-gradient-to-r from-[#00f3ff]/30 to-[#ff00ff]/30 text-white border border-[#00f3ff]' 
+                    : 'bg-gray-900 text-gray-500 border border-gray-700'
+                }`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
         )}
-        <button
-          onClick={handleImportClick}
-          disabled={isImporting}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-gray-300 hover:text-white hover:border-[#00f3ff] transition-colors font-mono text-sm"
-        >
-          {isImporting ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : (
-            <Upload size={16} />
-          )}
-          Import
-        </button>
-        <button
-          onClick={handleExport}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-800 border border-gray-600 rounded-lg text-gray-300 hover:text-white hover:border-[#ff00ff] transition-colors font-mono text-sm"
-        >
-          <Download size={16} />
-          Export
-        </button>
       </div>
 
       {/* Error Message */}
       {importError && (
-        <div className="absolute top-20 right-8 px-4 py-2 bg-red-900/50 border border-red-500 rounded-lg text-red-300 text-sm max-w-xs">
-          {importError}
-          <button 
-            onClick={() => setImportError(null)}
-            className="ml-2 text-red-400 hover:text-red-200"
-          >
-            ×
+        <div className="mx-4 md:mx-8 mt-4 px-4 py-3 bg-red-900/50 border border-red-500 rounded-xl text-red-300 text-sm flex items-center justify-between">
+          <span>{importError}</span>
+          <button onClick={() => setImportError(null)} className="text-red-400 hover:text-red-200">
+            <X size={16} />
           </button>
         </div>
       )}
 
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-black italic tracking-tight mb-2">
-          <span className="text-[#00f3ff]">SELECT</span>
-          <span className="text-white mx-2">/</span>
-          <span className="text-[#ff00ff]">BEATMAP</span>
-        </h1>
-        <p className="text-gray-500 font-mono text-sm uppercase tracking-widest">
-          Choose your challenge
-        </p>
-      </div>
-
-      {/* Beatmap Carousel */}
-      <div className="flex items-center gap-8 mb-8">
-        <button
-          onClick={handlePrev}
-          className="p-4 text-gray-500 hover:text-[#00f3ff] transition-colors hover:scale-110"
-        >
-          <ChevronLeft size={40} />
-        </button>
-
-        {/* Main Card */}
-        {selectedBeatmap && (
-          <div className="relative group">
-            {/* Glow Effect */}
-            <div className="absolute -inset-1 bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-300"></div>
-            
-            <div className="relative w-[400px] bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-              {/* Badge & Action Buttons */}
-              <div className="absolute top-4 left-4 flex gap-2 z-10">
-                {isCustomBeatmap(selectedBeatmap.id) ? (
-                  <span className="px-2 py-1 bg-purple-500/30 border border-purple-500 rounded text-purple-300 text-xs font-mono">
-                    CUSTOM
-                  </span>
-                ) : (
-                  <span className="px-2 py-1 bg-gray-500/30 border border-gray-500 rounded text-gray-300 text-xs font-mono">
-                    BUILT-IN
-                  </span>
-                )}
-                {onOpenEditor && (
-                  <button
-                    onClick={() => onOpenEditor(selectedBeatmap)}
-                    className="p-1 bg-cyan-500/30 border border-cyan-500 rounded text-cyan-300 hover:bg-cyan-500/50 transition-colors"
-                    title="Edit beatmap (creates a copy for custom beatmaps)"
-                  >
-                    <Edit size={14} />
-                  </button>
-                )}
-                {isCustomBeatmap(selectedBeatmap.id) && (
-                  <button
-                    onClick={handleDelete}
-                    className="p-1 bg-red-500/30 border border-red-500 rounded text-red-300 hover:bg-red-500/50 transition-colors"
-                    title="Delete beatmap"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-
-              {/* Difficulty Badge */}
-              <div className={`absolute top-4 right-4 px-3 py-1 rounded-full border ${DIFFICULTY_COLORS[selectedBeatmap.difficulty]} ${DIFFICULTY_BG[selectedBeatmap.difficulty]} font-mono text-xs uppercase tracking-wider`}>
-                {selectedBeatmap.difficulty}
-              </div>
-
-              {/* Album Art Placeholder */}
-              <div className="h-48 bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center border-b border-gray-700">
-                <Music size={64} className="text-gray-600" />
-              </div>
-
-              {/* Info Section */}
-              <div className="p-6 space-y-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-white mb-1">{selectedBeatmap.title}</h2>
-                  <p className="text-gray-400 font-mono text-sm">{selectedBeatmap.artist}</p>
-                </div>
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-3 gap-4 py-4 border-t border-b border-gray-700">
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-[#00f3ff] mb-1">
-                      <Zap size={16} />
-                      <span className="font-mono text-lg">{selectedBeatmap.bpm}</span>
+      {/* Beatmap List */}
+      <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
+        {filteredBeatmaps.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+            <Music size={48} className="mb-4 opacity-50" />
+            <p className="font-mono text-sm">No beatmaps found</p>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="mt-2 text-[#00f3ff] hover:underline font-mono text-sm"
+              >
+                Clear search
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-3 md:gap-4">
+            {filteredBeatmaps.map((beatmap, index) => {
+              const isSelected = index === selectedIndex;
+              const isCustom = isCustomBeatmap(beatmap.id);
+              
+              return (
+                <div
+                  key={beatmap.id}
+                  onClick={() => setSelectedIndex(index)}
+                  onDoubleClick={() => handleSelect(beatmap)}
+                  className={`
+                    group relative cursor-pointer rounded-xl md:rounded-2xl overflow-hidden transition-all duration-200
+                    ${isSelected 
+                      ? `bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 border-2 border-[#00f3ff] shadow-lg ${DIFFICULTY_GLOW[beatmap.difficulty]}` 
+                      : 'bg-gray-900/80 border border-gray-800 hover:border-gray-600'
+                    }
+                  `}
+                >
+                  {/* Selection indicator glow */}
+                  {isSelected && (
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#00f3ff]/10 to-[#ff00ff]/10 pointer-events-none" />
+                  )}
+                  
+                  <div className="relative flex items-center gap-3 md:gap-6 p-3 md:p-5">
+                    {/* Album Art / Icon */}
+                    <div className={`
+                      flex-shrink-0 w-14 h-14 md:w-20 md:h-20 rounded-lg md:rounded-xl flex items-center justify-center
+                      bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700
+                      ${isSelected ? 'border-[#00f3ff]/50' : ''}
+                    `}>
+                      <Music size={24} className={`md:hidden ${isSelected ? 'text-[#00f3ff]' : 'text-gray-600'}`} />
+                      <Music size={32} className={`hidden md:block ${isSelected ? 'text-[#00f3ff]' : 'text-gray-600'}`} />
                     </div>
-                    <span className="text-gray-500 text-xs uppercase tracking-wider">BPM</span>
-                  </div>
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-[#ff00ff] mb-1">
-                      <Clock size={16} />
-                      <span className="font-mono text-lg">{selectedBeatmap.duration}</span>
+                    
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-2 mb-1">
+                        <h3 className={`text-base md:text-xl font-bold truncate ${isSelected ? 'text-white' : 'text-gray-200'}`}>
+                          {beatmap.title}
+                        </h3>
+                        {/* Badges */}
+                        <div className="flex-shrink-0 flex gap-1.5">
+                          <span className={`
+                            px-2 py-0.5 rounded-full text-[10px] md:text-xs font-mono uppercase tracking-wider border
+                            ${DIFFICULTY_COLORS[beatmap.difficulty]} ${DIFFICULTY_BG[beatmap.difficulty]}
+                          `}>
+                            {beatmap.difficulty}
+                          </span>
+                          {isCustom ? (
+                            <span className="hidden sm:inline px-2 py-0.5 bg-purple-500/20 border border-purple-500 rounded-full text-purple-300 text-[10px] md:text-xs font-mono">
+                              CUSTOM
+                            </span>
+                          ) : (
+                            <span className="hidden sm:inline px-2 py-0.5 bg-gray-500/20 border border-gray-500 rounded-full text-gray-400 text-[10px] md:text-xs font-mono">
+                              BUILT-IN
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <p className={`text-sm font-mono truncate mb-2 ${isSelected ? 'text-gray-300' : 'text-gray-500'}`}>
+                        {beatmap.artist}
+                      </p>
+                      
+                      {/* Stats Row */}
+                      <div className="flex items-center gap-3 md:gap-6 text-xs md:text-sm">
+                        <div className="flex items-center gap-1 text-[#00f3ff]">
+                          <Zap size={14} />
+                          <span className="font-mono">{beatmap.bpm}</span>
+                          <span className="text-gray-600 hidden sm:inline">BPM</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[#ff00ff]">
+                          <Clock size={14} />
+                          <span className="font-mono">{beatmap.duration}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-gray-400">
+                          <Target size={14} />
+                          <span className="font-mono">{beatmap.noteCount}</span>
+                          <span className="text-gray-600 hidden sm:inline">notes</span>
+                        </div>
+                        
+                        {/* Difficulty Rating */}
+                        <div className="hidden md:flex items-center gap-1 ml-auto">
+                          {Array.from({ length: 10 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className={`w-1.5 h-3 rounded-sm ${
+                                i < beatmap.difficultyRating
+                                  ? 'bg-gradient-to-t from-[#00f3ff] to-[#ff00ff]'
+                                  : 'bg-gray-700'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-gray-500 text-xs uppercase tracking-wider">Duration</span>
-                  </div>
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-1 text-white mb-1">
-                      <Target size={16} />
-                      <span className="font-mono text-lg">{selectedBeatmap.noteCount}</span>
+                    
+                    {/* Action Buttons */}
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      {/* Desktop actions */}
+                      <div className={`hidden md:flex items-center gap-2 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                        {onOpenEditor && (
+                          <button
+                            onClick={(e) => handleEdit(beatmap, e)}
+                            className="p-2 bg-cyan-500/20 border border-cyan-500/50 rounded-lg text-cyan-300 hover:bg-cyan-500/30 transition-colors"
+                            title="Edit"
+                          >
+                            <Edit size={16} />
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => handleExport(beatmap, e)}
+                          className="p-2 bg-gray-700/50 border border-gray-600 rounded-lg text-gray-300 hover:text-white transition-colors"
+                          title="Export"
+                        >
+                          <Download size={16} />
+                        </button>
+                        {isCustom && (
+                          <button
+                            onClick={(e) => handleDelete(beatmap, e)}
+                            className="p-2 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300 hover:bg-red-500/30 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      {/* Play Button */}
+                      <button
+                        onClick={() => handleSelect(beatmap)}
+                        className={`
+                          p-3 md:p-4 rounded-xl transition-all duration-200
+                          ${isSelected 
+                            ? 'bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] text-black shadow-lg shadow-[#00f3ff]/30' 
+                            : 'bg-gray-800 text-gray-400 hover:text-white'
+                          }
+                        `}
+                      >
+                        <Play size={20} fill="currentColor" />
+                      </button>
                     </div>
-                    <span className="text-gray-500 text-xs uppercase tracking-wider">Notes</span>
                   </div>
+                  
+                  {/* Mobile expanded actions */}
+                  {isSelected && (
+                    <div className="md:hidden flex items-center justify-center gap-3 px-4 pb-3 pt-1 border-t border-gray-800">
+                      {onOpenEditor && (
+                        <button
+                          onClick={(e) => handleEdit(beatmap, e)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 border border-cyan-500/50 rounded-lg text-cyan-300 text-xs font-mono"
+                        >
+                          <Edit size={14} />
+                          Edit
+                        </button>
+                      )}
+                      <button
+                        onClick={(e) => handleExport(beatmap, e)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700/50 border border-gray-600 rounded-lg text-gray-300 text-xs font-mono"
+                      >
+                        <Download size={14} />
+                        Export
+                      </button>
+                      {isCustom && (
+                        <button
+                          onClick={(e) => handleDelete(beatmap, e)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/20 border border-red-500/50 rounded-lg text-red-300 text-xs font-mono"
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-
-                {/* Difficulty Rating */}
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-400 text-sm">Difficulty</span>
-                  <div className="flex gap-1">
-                    {Array.from({ length: 10 }).map((_, i) => (
-                      <div
-                        key={i}
-                        className={`w-2 h-4 rounded-sm transition-colors ${
-                          i < selectedBeatmap.difficultyRating
-                            ? 'bg-gradient-to-t from-[#00f3ff] to-[#ff00ff]'
-                            : 'bg-gray-700'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+              );
+            })}
           </div>
         )}
-
-        <button
-          onClick={handleNext}
-          className="p-4 text-gray-500 hover:text-[#ff00ff] transition-colors hover:scale-110"
-        >
-          <ChevronRight size={40} />
-        </button>
       </div>
 
-      {/* Pagination Dots */}
-      <div className="flex gap-2 mb-8">
-        {beatmaps.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => setSelectedIndex(i)}
-            className={`w-3 h-3 rounded-full transition-all ${
-              i === selectedIndex
-                ? 'bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] scale-125'
-                : 'bg-gray-600 hover:bg-gray-500'
-            }`}
-          />
-        ))}
-      </div>
-
-      {/* Play Button */}
-      <button
-        onClick={handleSelect}
-        className="group relative inline-flex items-center justify-center px-12 py-4 font-bold text-black transition-all duration-200 bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] font-mono uppercase tracking-widest hover:scale-105 hover:shadow-lg hover:shadow-[#00f3ff]/50"
-      >
-        <Play size={24} fill="currentColor" className="mr-2" />
-        Start Game
-      </button>
-
-      {/* Keyboard Hints */}
-      <div className="absolute bottom-8 flex gap-8 text-gray-600 font-mono text-xs">
-        <span>← → Navigate</span>
-        <span>Enter Select</span>
+      {/* Footer with Keyboard Hints (Desktop only) */}
+      <div className="hidden md:flex flex-shrink-0 items-center justify-center gap-8 py-4 border-t border-gray-800 text-gray-600 font-mono text-xs">
+        <span>↑ ↓ Navigate</span>
+        <span>Enter / Double-click to Play</span>
         <span>Esc Back</span>
       </div>
+      
+      {/* Mobile Bottom Safe Area */}
+      <div className="md:hidden h-4" />
     </div>
   );
 };
