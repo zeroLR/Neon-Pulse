@@ -1,7 +1,7 @@
 
 export type HandType = 'left' | 'right';
 export type BlockType = 'left' | 'right' | 'both';
-export type GameStatus = 'menu' | 'loading' | 'calibration' | 'beatmap-select' | 'playing' | 'gameover';
+export type GameStatus = 'menu' | 'loading' | 'calibration' | 'beatmap-select' | 'beatmap-editor' | 'playing' | 'gameover';
 
 // Beatmap difficulty levels
 export type BeatmapDifficulty = 'easy' | 'normal' | 'hard' | 'expert';

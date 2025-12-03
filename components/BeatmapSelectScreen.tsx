@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Play, Music, Clock, Zap, Target, Upload, Download, Trash2, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Music, Clock, Zap, Target, Upload, Download, Trash2, Loader2, Plus, Edit } from 'lucide-react';
 import { Beatmap, BeatmapDifficulty } from '../types';
 import { useBeatmaps } from '../hooks';
 
 interface BeatmapSelectScreenProps {
   onSelect: (beatmap: Beatmap) => void;
   onBack: () => void;
+  onOpenEditor?: (beatmap?: Beatmap) => void;
 }
 
 const DIFFICULTY_COLORS: Record<BeatmapDifficulty, string> = {
@@ -22,7 +23,7 @@ const DIFFICULTY_BG: Record<BeatmapDifficulty, string> = {
   expert: 'bg-red-400/20',
 };
 
-const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onBack }) => {
+const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onBack, onOpenEditor }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -142,8 +143,17 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
         </button>
       </div>
 
-      {/* Import/Export Buttons */}
+      {/* Import/Export/Create Buttons */}
       <div className="absolute top-8 right-8 flex gap-2">
+        {onOpenEditor && (
+          <button
+            onClick={() => onOpenEditor()}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#00f3ff]/20 to-[#ff00ff]/20 border border-[#00f3ff] rounded-lg text-[#00f3ff] hover:text-white hover:border-white transition-colors font-mono text-sm"
+          >
+            <Plus size={16} />
+            Create New
+          </button>
+        )}
         <button
           onClick={handleImportClick}
           disabled={isImporting}
@@ -205,13 +215,22 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
             <div className="absolute -inset-1 bg-gradient-to-r from-[#00f3ff] to-[#ff00ff] rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-300"></div>
             
             <div className="relative w-[400px] bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-              {/* Custom Badge & Delete Button */}
+              {/* Custom Badge & Action Buttons */}
               <div className="absolute top-4 left-4 flex gap-2 z-10">
                 {isCustomBeatmap(selectedBeatmap.id) && (
                   <>
                     <span className="px-2 py-1 bg-purple-500/30 border border-purple-500 rounded text-purple-300 text-xs font-mono">
                       CUSTOM
                     </span>
+                    {onOpenEditor && (
+                      <button
+                        onClick={() => onOpenEditor(selectedBeatmap)}
+                        className="p-1 bg-cyan-500/30 border border-cyan-500 rounded text-cyan-300 hover:bg-cyan-500/50 transition-colors"
+                        title="Edit beatmap"
+                      >
+                        <Edit size={14} />
+                      </button>
+                    )}
                     <button
                       onClick={handleDelete}
                       className="p-1 bg-red-500/30 border border-red-500 rounded text-red-300 hover:bg-red-500/50 transition-colors"
