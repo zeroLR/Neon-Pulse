@@ -7,7 +7,7 @@ export const GAME_CONFIG = {
   // 3D World Constants
   CAMERA_Z: 12, // Moved back for TPS
   SPAWN_Z: -50, // Much deeper spawn for more immersion
-  HIT_Z: 0, 
+  HIT_Z: 120, 
   DESPAWN_Z: 10, 
   
   // Camera Settings
@@ -223,10 +223,6 @@ export const DIRECTION_ANGLES: Record<SlashDirection, number> = {
 
 // Import beatmaps from JSON files
 import fadedBeatmap from './beatmaps/faded.json';
-import tutorialBeatmap from './beatmaps/tutorial.json';
-import neonDreamsBeatmap from './beatmaps/neon-dreams.json';
-import zenFlowBeatmap from './beatmaps/zen-flow.json';
-import cyberRushBeatmap from './beatmaps/cyber-rush.json';
 
 // Helper to count notes in a beatmap
 const countNotes = (data: BeatData[][]): number => {
@@ -264,14 +260,10 @@ const processBeatmap = (raw: any): Beatmap => ({
 // Beatmap Collection - loaded from JSON files
 export const BEATMAPS: Beatmap[] = [
   processBeatmap(fadedBeatmap),
-  processBeatmap(tutorialBeatmap),
-  processBeatmap(neonDreamsBeatmap),
-  processBeatmap(zenFlowBeatmap),
-  processBeatmap(cyberRushBeatmap),
 ];
 
 // Default beatmap (for backwards compatibility)
-export const DEFAULT_BEATMAP = BEATMAPS.find(b => b.id === 'neon-dreams')!;
+export const DEFAULT_BEATMAP = BEATMAPS.find(b => b.id === 'faded')!;
 
 // Legacy export for compatibility
 export const BEAT_MAP = DEFAULT_BEATMAP.data;
