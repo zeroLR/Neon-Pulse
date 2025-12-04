@@ -47,7 +47,7 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
     importBeatmap, 
     exportBeatmap, 
     deleteBeatmap, 
-    isCustomBeatmap 
+    isBuiltInBeatmap 
   } = useBeatmaps();
 
   // Filter beatmaps based on search and filter type
@@ -57,8 +57,8 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
       beatmap.artist.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesFilter = filterType === 'all' ||
-      (filterType === 'custom' && isCustomBeatmap(beatmap.id)) ||
-      (filterType === 'built-in' && !isCustomBeatmap(beatmap.id));
+      (filterType === 'custom' && !isBuiltInBeatmap(beatmap.id)) ||
+      (filterType === 'built-in' && isBuiltInBeatmap(beatmap.id));
     
     return matchesSearch && matchesFilter;
   });
@@ -100,7 +100,7 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
 
   const handleDelete = async (beatmap: Beatmap, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isCustomBeatmap(beatmap.id)) return;
+    if (isBuiltInBeatmap(beatmap.id)) return;
     
     if (confirm(`Delete "${beatmap.title}"?`)) {
       try {
@@ -319,7 +319,7 @@ const BeatmapSelectScreen: React.FC<BeatmapSelectScreenProps> = ({ onSelect, onB
           <div className="grid gap-3 md:gap-4">
             {filteredBeatmaps.map((beatmap, index) => {
               const isSelected = index === selectedIndex;
-              const isCustom = isCustomBeatmap(beatmap.id);
+              const isCustom = !isBuiltInBeatmap(beatmap.id);
               
               return (
                 <div
