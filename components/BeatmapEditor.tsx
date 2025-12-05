@@ -4,7 +4,7 @@ import {
   ArrowLeft, Play, Pause, Plus, Trash2, Download, Upload, 
   Save, Music, ChevronDown, ChevronUp, Volume2, VolumeX,
   SkipBack, SkipForward, Copy, Eye, EyeOff, Menu, X,
-  Settings, List, Edit3
+  Settings, List, Edit3, GripVertical
 } from 'lucide-react';
 import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection } from '../types';
 import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS } from '../constants';
@@ -72,6 +72,20 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
   const [showPreview, setShowPreview] = useState(true);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('timeline');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  
+  // Drag and drop state
+  const [draggedMeasure, setDraggedMeasure] = useState<number | null>(null);
+  const [dragOverMeasure, setDragOverMeasure] = useState<number | null>(null);
+  
+  // Touch drag state
+  const touchStartY = useRef<number>(0);
+  const touchCurrentY = useRef<number>(0);
+  const measureRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const measureListRef = useRef<HTMLDivElement>(null);
+  const isDraggingTouch = useRef<boolean>(false);
+  const dragHandleRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const dragTimerRef = useRef<number | null>(null);
+  const touchDragIndexRef = useRef<number | null>(null);
   
   // Refs
   const youtubeRef = useRef<HTMLIFrameElement>(null);
@@ -366,6 +380,194 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
     newMeasures.splice(index + 1, 0, JSON.parse(JSON.stringify(measures[index])));
     setMeasures(newMeasures);
   };
+  
+  // Drag and drop handlers for measures
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedMeasure(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+    // Add a slight delay to show the drag visual
+    setTimeout(() => {
+      (e.target as HTMLElement).style.opacity = '0.5';
+    }, 0);
+  };
+  
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDraggedMeasure(null);
+    setDragOverMeasure(null);
+  };
+  
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedMeasure !== null && draggedMeasure !== index) {
+      setDragOverMeasure(index);
+    }
+  };
+  
+  const handleDragLeave = () => {
+    setDragOverMeasure(null);
+  };
+  
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedMeasure === null || draggedMeasure === dropIndex) {
+      setDraggedMeasure(null);
+      setDragOverMeasure(null);
+      return;
+    }
+    
+    const newMeasures = [...measures];
+    const [removed] = newMeasures.splice(draggedMeasure, 1);
+    newMeasures.splice(dropIndex, 0, removed);
+    setMeasures(newMeasures);
+    
+    // Update selected measure if needed
+    if (selectedMeasure === draggedMeasure) {
+      setSelectedMeasure(dropIndex);
+    } else if (draggedMeasure < selectedMeasure && dropIndex >= selectedMeasure) {
+      setSelectedMeasure(selectedMeasure - 1);
+    } else if (draggedMeasure > selectedMeasure && dropIndex <= selectedMeasure) {
+      setSelectedMeasure(selectedMeasure + 1);
+    }
+    
+    setDraggedMeasure(null);
+    setDragOverMeasure(null);
+  };
+  
+  // Touch drag handlers - need to be used with useEffect for non-passive listeners
+  const handleTouchStartForIndex = useCallback((index: number) => (e: TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartY.current = touch.clientY;
+    touchCurrentY.current = touch.clientY;
+    isDraggingTouch.current = false;
+    touchDragIndexRef.current = index;
+    
+    // Clear any existing timer
+    if (dragTimerRef.current) {
+      clearTimeout(dragTimerRef.current);
+    }
+    
+    // Start drag after a short delay to distinguish from scroll
+    dragTimerRef.current = window.setTimeout(() => {
+      if (Math.abs(touchCurrentY.current - touchStartY.current) < 10) {
+        isDraggingTouch.current = true;
+        setDraggedMeasure(index);
+        // Prevent scrolling while dragging
+        document.body.style.overflow = 'hidden';
+      }
+    }, 200);
+  }, []);
+  
+  const handleTouchMoveGlobal = useCallback((e: TouchEvent) => {
+    const touch = e.touches[0];
+    touchCurrentY.current = touch.clientY;
+    
+    if (!isDraggingTouch.current || draggedMeasure === null) return;
+    
+    e.preventDefault();
+    
+    // Find which measure we're over
+    const measureElements = measureRefs.current;
+    for (let i = 0; i < measureElements.length; i++) {
+      const el = measureElements[i];
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+          if (i !== draggedMeasure) {
+            setDragOverMeasure(i);
+          }
+          break;
+        }
+      }
+    }
+  }, [draggedMeasure]);
+  
+  const handleTouchEndGlobal = useCallback(() => {
+    // Clear the timer
+    if (dragTimerRef.current) {
+      clearTimeout(dragTimerRef.current);
+      dragTimerRef.current = null;
+    }
+    
+    // Re-enable scrolling
+    document.body.style.overflow = '';
+    
+    if (!isDraggingTouch.current || draggedMeasure === null) {
+      isDraggingTouch.current = false;
+      touchDragIndexRef.current = null;
+      return;
+    }
+    
+    if (dragOverMeasure !== null && dragOverMeasure !== draggedMeasure) {
+      setMeasures(prev => {
+        const newMeasures = [...prev];
+        const [removed] = newMeasures.splice(draggedMeasure, 1);
+        newMeasures.splice(dragOverMeasure, 0, removed);
+        return newMeasures;
+      });
+      
+      // Update selected measure if needed
+      setSelectedMeasure(prev => {
+        if (prev === draggedMeasure) {
+          return dragOverMeasure;
+        } else if (draggedMeasure < prev && dragOverMeasure >= prev) {
+          return prev - 1;
+        } else if (draggedMeasure > prev && dragOverMeasure <= prev) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    }
+    
+    isDraggingTouch.current = false;
+    touchDragIndexRef.current = null;
+    setDraggedMeasure(null);
+    setDragOverMeasure(null);
+  }, [draggedMeasure, dragOverMeasure]);
+  
+  // Setup touch event listeners with passive: false
+  useEffect(() => {
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      handleTouchMoveGlobal(e);
+    };
+    
+    const handleGlobalTouchEnd = () => {
+      handleTouchEndGlobal();
+    };
+    
+    // Add global listeners for move and end
+    document.addEventListener('touchmove', handleGlobalTouchMove, { passive: false });
+    document.addEventListener('touchend', handleGlobalTouchEnd);
+    document.addEventListener('touchcancel', handleGlobalTouchEnd);
+    
+    return () => {
+      document.removeEventListener('touchmove', handleGlobalTouchMove);
+      document.removeEventListener('touchend', handleGlobalTouchEnd);
+      document.removeEventListener('touchcancel', handleGlobalTouchEnd);
+    };
+  }, [handleTouchMoveGlobal, handleTouchEndGlobal]);
+  
+  // Setup touch start listeners on drag handles
+  useEffect(() => {
+    const handles = dragHandleRefs.current;
+    const listeners: Array<{ el: HTMLDivElement; handler: (e: TouchEvent) => void }> = [];
+    
+    handles.forEach((el, index) => {
+      if (el) {
+        const handler = handleTouchStartForIndex(index);
+        el.addEventListener('touchstart', handler, { passive: true });
+        listeners.push({ el, handler });
+      }
+    });
+    
+    return () => {
+      listeners.forEach(({ el, handler }) => {
+        el.removeEventListener('touchstart', handler);
+      });
+    };
+  }, [measures.length, handleTouchStartForIndex]);
   
   // Beat editing
   const updateBeat = (measureIndex: number, beatIndex: number, data: BeatData) => {
@@ -813,22 +1015,44 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
           flex-1 flex-col overflow-hidden
         `}>
           {/* Measure List */}
-          <div className="flex-1 overflow-y-auto p-2 md:p-4">
+          <div ref={measureListRef} className="flex-1 overflow-y-auto p-2 md:p-4">
             <div className="space-y-2">
               {measures.map((measure, measureIndex) => (
                 <div
                   key={measureIndex}
-                  className={`border rounded-lg p-3 transition-colors ${
+                  ref={(el) => { measureRefs.current[measureIndex] = el; }}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, measureIndex)}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={(e) => handleDragOver(e, measureIndex)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, measureIndex)}
+                  className={`border rounded-lg p-3 transition-all ${
                     selectedMeasure === measureIndex 
                       ? 'border-cyan-400 bg-cyan-900/20' 
                       : 'border-gray-700 bg-gray-800/50 hover:border-gray-500'
+                  } ${
+                    dragOverMeasure === measureIndex && draggedMeasure !== measureIndex
+                      ? 'border-yellow-400 border-2 bg-yellow-900/20'
+                      : ''
+                  } ${
+                    draggedMeasure === measureIndex ? 'opacity-50' : ''
                   }`}
                   onClick={() => setSelectedMeasure(measureIndex)}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-semibold text-gray-400">
-                      Measure {measureIndex + 1}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <div 
+                        ref={(el) => { dragHandleRefs.current[measureIndex] = el; }}
+                        className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300 transition-colors touch-none select-none p-1"
+                        title="Drag to reorder"
+                      >
+                        <GripVertical size={16} />
+                      </div>
+                      <span className="text-sm font-semibold text-gray-400">
+                        Measure {measureIndex + 1}
+                      </span>
+                    </div>
                     <div className="flex gap-1">
                       <button
                         onClick={(e) => { e.stopPropagation(); duplicateMeasure(measureIndex); }}
