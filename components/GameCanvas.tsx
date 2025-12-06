@@ -54,6 +54,7 @@ interface GameCanvasProps {
   setGameStatus: (status: any) => void;
   onCalibrationComplete: () => void;
   onRecalibrateRequest: () => void;
+  onExit?: () => void;
   beatmap: Beatmap;
 }
 
@@ -63,6 +64,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   setGameStatus, 
   onCalibrationComplete,
   onRecalibrateRequest,
+  onExit,
   beatmap
 }) => {
   // Refs
@@ -659,7 +661,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const handleExit = () => {
-    setGameStatus('beatmap-select');
+    if (onExit) {
+      onExit();
+    } else {
+      setGameStatus('beatmap-select');
+    }
   };
 
   return (
