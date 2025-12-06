@@ -101,6 +101,13 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
   const previewBlocksRef = useRef<THREE.Group[]>([]);
   const previewAnimationRef = useRef<number | null>(null);
   
+  // Preview window drag state
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+  const previewDragStart = useRef<{ x: number; y: number; posX: number; posY: number } | null>(null);
+  const previewDragTimer = useRef<number | null>(null);
+  const isPreviewDragging = useRef<boolean>(false);
+  
   // Calculate beat interval in ms
   const beatInterval = 60000 / bpm;
   
@@ -198,6 +205,88 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
       previewBlocksRef.current = [];
     }
   };
+  
+  // Preview window drag handlers
+  const handlePreviewDragStart = useCallback((clientX: number, clientY: number) => {
+    previewDragStart.current = {
+      x: clientX,
+      y: clientY,
+      posX: previewPosition.x,
+      posY: previewPosition.y
+    };
+    
+    // Clear any existing timer
+    if (previewDragTimer.current) {
+      clearTimeout(previewDragTimer.current);
+    }
+    
+    // Start drag after 200ms delay
+    previewDragTimer.current = window.setTimeout(() => {
+      isPreviewDragging.current = true;
+      document.body.style.cursor = 'grabbing';
+    }, 200);
+  }, [previewPosition]);
+  
+  const handlePreviewDragMove = useCallback((clientX: number, clientY: number) => {
+    if (!isPreviewDragging.current || !previewDragStart.current) return;
+    
+    const dx = clientX - previewDragStart.current.x;
+    const dy = clientY - previewDragStart.current.y;
+    
+    // Since we use right/bottom positioning, we need to invert the delta
+    // Moving mouse right (positive dx) should decrease 'right' value
+    // Moving mouse down (positive dy) should decrease 'bottom' value
+    setPreviewPosition({
+      x: previewDragStart.current.posX - dx,
+      y: previewDragStart.current.posY - dy
+    });
+  }, []);
+  
+  const handlePreviewDragEnd = useCallback(() => {
+    if (previewDragTimer.current) {
+      clearTimeout(previewDragTimer.current);
+      previewDragTimer.current = null;
+    }
+    isPreviewDragging.current = false;
+    previewDragStart.current = null;
+    document.body.style.cursor = '';
+  }, []);
+  
+  // Global mouse/touch listeners for preview drag
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      handlePreviewDragMove(e.clientX, e.clientY);
+    };
+    
+    const handleMouseUp = () => {
+      handlePreviewDragEnd();
+    };
+    
+    const handleTouchMovePreview = (e: TouchEvent) => {
+      if (isPreviewDragging.current) {
+        e.preventDefault();
+        handlePreviewDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+    
+    const handleTouchEndPreview = () => {
+      handlePreviewDragEnd();
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('touchmove', handleTouchMovePreview, { passive: false });
+    document.addEventListener('touchend', handleTouchEndPreview);
+    document.addEventListener('touchcancel', handleTouchEndPreview);
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('touchmove', handleTouchMovePreview);
+      document.removeEventListener('touchend', handleTouchEndPreview);
+      document.removeEventListener('touchcancel', handleTouchEndPreview);
+    };
+  }, [handlePreviewDragMove, handlePreviewDragEnd]);
   
   // Cleanup on unmount
   useEffect(() => {
@@ -313,7 +402,7 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
     };
   }, [showPreview, bpm]);
   
-  // Spawn blocks when playing
+  // Spawn blocks when playing - supports NoteGroup for simultaneous notes and sub-beat offsets
   useEffect(() => {
     if (!isPlaying || !showPreview || !previewSceneRef.current) return;
     
@@ -322,10 +411,16 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
     // Get notes for current beat
     const { measure, beat } = getMeasureAndBeat(currentPlayBeat);
     const beatData = measures[measure]?.[beat];
-    const notes = getNotesFromBeat(beatData);
     
-    // Spawn blocks for each note
-    notes.forEach(note => {
+    if (beatData === null) return;
+    
+    // Block speed calculation for z offset
+    const travelDistance = Math.abs(GAME_CONFIG.SPAWN_Z - GAME_CONFIG.HIT_Z);
+    const secondsPerBeat = 60 / bpm;
+    const distancePerBeat = travelDistance / (GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS || 4);
+    
+    // Helper to spawn a single note
+    const spawnNote = (note: string | BlockNote, zOffset: number = 0) => {
       const track = typeof note === 'string' ? note : note.track;
       const trackInfo = TRACK_LAYOUT.find(t => t.label === track);
       if (!trackInfo) return;
@@ -333,15 +428,43 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
       const type = getTrackType(track);
       const block = createBlockMesh(type, 0.8);
       
-      // Position based on track
+      // Position based on track, with z offset for sub-beat timing
       const x = (trackInfo.x - 0.5) * 16;
       const y = (0.5 - trackInfo.y) * 10 - 1;
-      block.position.set(x, y, GAME_CONFIG.SPAWN_Z);
+      block.position.set(x, y, GAME_CONFIG.SPAWN_Z - zOffset);
       
       scene.add(block);
       previewBlocksRef.current.push(block);
-    });
-  }, [currentPlayBeat, isPlaying, showPreview, measures]);
+    };
+    
+    if (Array.isArray(beatData)) {
+      // Array of items - each item gets a sub-beat offset
+      const subBeatOffset = distancePerBeat / beatData.length;
+      
+      beatData.forEach((item, index) => {
+        const zOffset = index * subBeatOffset;
+        
+        if (isNoteGroup(item as BeatItem)) {
+          // NoteGroup: all notes in the group spawn at same z (same time)
+          const group = item as NoteGroup;
+          group.notes.forEach(note => {
+            spawnNote(note, zOffset);
+          });
+        } else {
+          // Single note
+          spawnNote(item as string | BlockNote, zOffset);
+        }
+      });
+    } else if (isNoteGroup(beatData)) {
+      // Single NoteGroup: all notes spawn at same z (same time)
+      beatData.notes.forEach(note => {
+        spawnNote(note, 0);
+      });
+    } else {
+      // Single note
+      spawnNote(beatData, 0);
+    }
+  }, [currentPlayBeat, isPlaying, showPreview, measures, bpm]);
   
   // Clear preview blocks when not playing
   useEffect(() => {
@@ -1408,12 +1531,23 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
         </div>
       </div>
       
-      {/* 3D Preview Window - Fixed position on both mobile and desktop */}
-      <div className="fixed bottom-20 md:bottom-16 right-2 md:right-4 z-[101]">
+      {/* 3D Preview Window - Fixed position on both mobile and desktop, draggable */}
+      <div 
+        ref={previewContainerRef}
+        className="fixed z-[101] select-none"
+        style={{ 
+          bottom: `${80 + previewPosition.y}px`,
+          right: `${8 + previewPosition.x}px`
+        }}
+      >
         <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden shadow-2xl">
-          {/* Preview Header */}
-          <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
-            <span className="text-xs text-gray-400 font-mono">3D Preview</span>
+          {/* Preview Header - Drag handle */}
+          <div 
+            className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 cursor-grab active:cursor-grabbing"
+            onMouseDown={(e) => handlePreviewDragStart(e.clientX, e.clientY)}
+            onTouchStart={(e) => handlePreviewDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+          >
+            <span className="text-xs text-gray-400 font-mono">3D Preview (drag to move)</span>
             <button
               onClick={() => setShowPreview(!showPreview)}
               className="p-1 text-gray-400 hover:text-white transition-colors"
