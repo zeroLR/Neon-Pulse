@@ -1,5 +1,5 @@
 import React from 'react';
-import { Beatmap } from '../types';
+import { Beatmap } from '../../types';
 
 interface YouTubePlayerProps {
   beatmap: Beatmap;

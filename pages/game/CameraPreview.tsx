@@ -1,5 +1,5 @@
 import React from 'react';
-import { GAME_CONFIG } from '../constants';
+import { GAME_CONFIG } from '../../constants';
 
 interface CameraPreviewProps {
   cameraPreviewRef: React.RefObject<HTMLCanvasElement>;

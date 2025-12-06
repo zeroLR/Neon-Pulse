@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Settings, Shield, Activity, Box, RefreshCw, Square, User, Sliders, Sparkles, Camera } from 'lucide-react';
-import { DebugConfig } from '../types';
+import { DebugConfig } from '../../types';
 
 interface DebugMenuProps {
   config: DebugConfig;

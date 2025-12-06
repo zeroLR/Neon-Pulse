@@ -1,5 +1,5 @@
 import React from 'react';
-import { GameStats } from '../types';
+import { GameStats } from '../../types';
 import { ScoreDisplay, ComboDisplay, HealthBar } from './HUD';
 
 interface GameHUDProps {

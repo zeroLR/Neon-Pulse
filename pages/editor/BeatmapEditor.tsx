@@ -6,10 +6,10 @@ import {
   SkipBack, SkipForward, Copy, Eye, EyeOff, Menu, X,
   Settings, List, Edit3, GripVertical, Check
 } from 'lucide-react';
-import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection, NoteGroup, SingleNote, BeatItem } from '../types';
-import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS, isNoteGroup } from '../constants';
-import { beatmapStorage, processBeatmap, RawBeatmap } from '../services/beatmapStorage';
-import { createBlockMesh } from '../utils/threeHelpers';
+import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection, NoteGroup, SingleNote, BeatItem } from '../../types';
+import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS, isNoteGroup } from '../../constants';
+import { beatmapStorage, processBeatmap, RawBeatmap } from '../../services/beatmapStorage';
+import { createBlockMesh } from '../../utils/threeHelpers';
 
 // Mobile panel types
 type MobilePanel = 'timeline' | 'metadata' | 'beatEditor';

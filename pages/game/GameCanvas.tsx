@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote, isNoteGroup, getNotesFromBeatItem } from '../constants';
-import { BlockNote, BeatData, Beatmap, BeatItem } from '../types';
+import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote, isNoteGroup, getNotesFromBeatItem } from '../../constants';
+import { BlockNote, BeatData, Beatmap, BeatItem } from '../../types';
 
 // Hooks
 import { 
@@ -12,8 +12,8 @@ import {
   useThreeScene,
   useYouTubePlayer,
   usePoseTracking
-} from '../hooks';
-import { Results } from '../types';
+} from '../../hooks';
+import { Results } from '../../types';
 
 // Utils
 import { 
@@ -21,11 +21,11 @@ import {
   updateTrail as updateTrailUtil,
   updateAvatar as updateAvatarUtil,
   mapTo3D as mapTo3DUtil,
-} from '../utils/threeHelpers';
+} from '../../utils/threeHelpers';
 import { 
   getSaberBladePoints, 
   checkBlockCollision as checkBlockCollisionUtil 
-} from '../utils/collision';
+} from '../../utils/collision';
 import { 
   createExplosion as createExplosionUtil,
   createSlashEffect as createSlashEffectUtil,
@@ -35,7 +35,7 @@ import {
   updateSlashEffects,
   updateDebris,
   EffectRefs
-} from '../utils/effects';
+} from '../../utils/effects';
 
 // Components
 import CalibrationOverlay from './CalibrationOverlay';

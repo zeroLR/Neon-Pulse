@@ -1,6 +1,6 @@
 import React from 'react';
 import { RotateCcw, ListMusic } from 'lucide-react';
-import { Beatmap } from '../types';
+import { Beatmap } from '../../types';
 
 interface GameOverScreenProps {
   score: number;

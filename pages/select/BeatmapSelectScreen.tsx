@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { ChevronLeft, Play, Music, Clock, Zap, Target, Upload, Download, Trash2, Loader2, Plus, Edit, Search, X, Filter } from 'lucide-react';
-import { Beatmap, BeatmapDifficulty } from '../types';
-import { useBeatmaps } from '../hooks';
+import { Beatmap, BeatmapDifficulty } from '../../types';
+import { useBeatmaps } from '../../hooks';
 
 interface BeatmapSelectScreenProps {
   onSelect: (beatmap: Beatmap) => void;

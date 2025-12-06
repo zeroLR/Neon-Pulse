@@ -1,5 +1,5 @@
 import React, { useState, useEffect, MutableRefObject } from 'react';
-import { GameStats } from '../types';
+import { GameStats } from '../../types';
 
 interface HUDProps {
   statsRef: MutableRefObject<GameStats>;
