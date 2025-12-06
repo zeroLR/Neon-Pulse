@@ -25,7 +25,7 @@ export const GAME_CONFIG = {
     DIVISIONS: 100,
     POSITION_Y: -6,
     POSITION_Z: -80,
-    COLOR_CENTER: 0x333344, // Brighter center
+    COLOR_CENTER: 0x444455, // Brighter center
     COLOR_GRID: 0x111122, // Subtle grid lines
   },
   
@@ -38,10 +38,10 @@ export const GAME_CONFIG = {
   },
   
   // Gameplay
-  BLOCK_SPEED: 50, // Faster to cover the longer distance
+  BLOCK_SPEED: 70, // Faster to cover the longer distance
   HIT_THRESHOLD: 2.0, // Legacy radius check
   VELOCITY_THRESHOLD: 0.1, // Reduced threshold for 3D velocity
-  INITIAL_SPAWN_DELAY: 2000, // ms before first block spawns
+  INITIAL_SPAWN_DELAY: 2500, // ms before first block spawns
   
   // Hit Detection Zone
   HIT_ZONE: {
@@ -53,8 +53,8 @@ export const GAME_CONFIG = {
   // Block Spawn
   SPAWN: {
     SPREAD_FACTOR: 1.3, // How much blocks spread out at spawn
-    TRACK_FLASH_DURATION: 500, // ms
-    LOOKAHEAD_BEATS: 8, // How many beats ahead to spawn blocks
+    TRACK_FLASH_DURATION: 300, // ms
+    LOOKAHEAD_BEATS: 10, // How many beats ahead to spawn blocks
   },
   
   // Visuals & Hitbox
@@ -62,7 +62,7 @@ export const GAME_CONFIG = {
   BLOCK_HITBOX_SIZE: 2.5, // Physical collision size (Increased from 1.6)
   
   // Physics (Debris)
-  GRAVITY: 25.0,
+  GRAVITY: 60.0,
   DEBRIS_LIFE: 0.8, // Seconds
   DEBRIS_EXPLOSION_FORCE: 5.0,
 
