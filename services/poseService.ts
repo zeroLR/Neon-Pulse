@@ -3,8 +3,38 @@ import { Pose, Results } from '../types';
 declare global {
   interface Window {
     Pose: new (config: { locateFile: (file: string) => string }) => Pose;
+    __activeCameraStream?: MediaStream | null;
   }
 }
+
+// Store stream globally so we can always access and stop it
+const setGlobalStream = (stream: MediaStream | null) => {
+  if (window.__activeCameraStream && window.__activeCameraStream !== stream) {
+    // Stop any existing stream before setting new one
+    console.log('Stopping previous global stream...');
+    window.__activeCameraStream.getTracks().forEach(track => {
+      console.log('Stopping old track:', track.kind, track.readyState);
+      track.stop();
+    });
+  }
+  window.__activeCameraStream = stream;
+};
+
+// Global function to stop all camera streams
+export const stopAllCameraStreams = () => {
+  console.log('stopAllCameraStreams called');
+  if (window.__activeCameraStream) {
+    console.log('Found global stream, stopping...');
+    window.__activeCameraStream.getTracks().forEach(track => {
+      console.log('Stopping global track:', track.kind, track.label, 'readyState:', track.readyState);
+      track.stop();
+      console.log('After stop, readyState:', track.readyState);
+    });
+    window.__activeCameraStream = null;
+  } else {
+    console.log('No global stream found');
+  }
+};
 
 export class PoseService {
   private pose: Pose | null = null;
@@ -42,6 +72,9 @@ export class PoseService {
     if (!this.pose) await this.initialize();
 
     try {
+      // Stop any existing global stream first
+      stopAllCameraStreams();
+      
       this.stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -49,6 +82,9 @@ export class PoseService {
           facingMode: 'user'
         }
       });
+      
+      // Store in global for cleanup
+      setGlobalStream(this.stream);
 
       videoElement.srcObject = this.stream;
       
@@ -84,19 +120,28 @@ export class PoseService {
   }
 
   public stop() {
+    console.log('PoseService.stop() called');
+    
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
 
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      console.log('Stopping camera tracks...');
+      this.stream.getTracks().forEach(track => {
+        console.log('Stopping track:', track.kind, track.label);
+        track.stop();
+      });
       this.stream = null;
+      console.log('Camera tracks stopped');
     }
 
     if (this.pose) {
       this.pose.close();
       this.pose = null;
     }
+    
+    console.log('PoseService.stop() completed');
   }
 }

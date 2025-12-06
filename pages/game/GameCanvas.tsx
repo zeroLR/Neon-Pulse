@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote, isNoteGroup, getNotesFromBeatItem } from '../../constants';
 import { BlockNote, BeatData, Beatmap, BeatItem } from '../../types';
@@ -48,6 +48,11 @@ import CameraPreview from './CameraPreview';
 import YouTubePlayer from './YouTubePlayer';
 import ErrorOverlay from './ErrorOverlay';
 
+// Exposed methods for parent component
+export interface GameCanvasHandle {
+  stopPoseDetection: () => void;
+}
+
 interface GameCanvasProps {
   onGameOver: (score: number) => void;
   gameStatus: 'loading' | 'playing' | 'gameover' | 'menu' | 'calibration' | 'beatmap-select' | 'beatmap-editor';
@@ -58,7 +63,7 @@ interface GameCanvasProps {
   beatmap: Beatmap;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ 
+const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ 
   onGameOver, 
   gameStatus, 
   setGameStatus, 
@@ -66,10 +71,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   onRecalibrateRequest,
   onExit,
   beatmap
-}) => {
+}, ref) => {
   // Refs
   const flashRef = useRef<HTMLDivElement>(null);
   const cameraStartedForSession = useRef<boolean>(false);
+  const isExiting = useRef<boolean>(false); // Flag to prevent camera restart during exit
 
   // Pose Tracking (lazy initialization)
   const poseTracking = usePoseTracking();
@@ -82,6 +88,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     start: startPose, 
     stop: stopPose 
   } = poseTracking;
+  
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    stopPoseDetection: () => {
+      stopPose();
+    }
+  }), [stopPose]);
 
   // Three.js Scene
   const threeScene = useThreeScene();
@@ -583,6 +596,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Pose tracking - start/stop based on game status
   useEffect(() => {
+    // Don't restart camera if we're exiting
+    if (isExiting.current) {
+      return;
+    }
+    
     const shouldPoseBeActive = gameStatus === 'playing' || gameStatus === 'calibration';
     
     if (shouldPoseBeActive && !isPoseActive && !isPoseInitializing) {
@@ -630,15 +648,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     }
   }, [countdown, isPaused, beatmap.youtubeId, youtube, isGameActive]);
 
-  // Cleanup
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Stop pose detection and camera when component unmounts
+      stopPose();
+      
       if (gameOverDelayTimer.current !== null) {
         clearTimeout(gameOverDelayTimer.current);
         gameOverDelayTimer.current = null;
       }
     };
-  }, []);
+  }, [stopPose]);
 
   // Handlers
   const handlePause = () => {
@@ -661,11 +682,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const handleExit = () => {
-    if (onExit) {
-      onExit();
-    } else {
-      setGameStatus('beatmap-select');
-    }
+    // Set flag to prevent camera restart during exit
+    isExiting.current = true;
+    
+    // Stop pose detection and camera before navigating away
+    console.log('handleExit: stopping pose detection...');
+    stopPose();
+    
+    // Small delay to ensure camera is fully released before navigation
+    setTimeout(() => {
+      console.log('handleExit: navigating after delay...');
+      if (onExit) {
+        onExit();
+      } else {
+        setGameStatus('beatmap-select');
+      }
+    }, 100);
   };
 
   return (
@@ -740,6 +772,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       )}
     </div>
   );
-};
+});
+
+GameCanvas.displayName = 'GameCanvas';
 
 export default GameCanvas;

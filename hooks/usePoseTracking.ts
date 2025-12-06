@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback } from 'react';
-import { PoseService } from '../services/poseService';
+import { PoseService, stopAllCameraStreams } from '../services/poseService';
 import { NormalizedLandmark, Results } from '../types';
 
 export interface UsePoseTrackingReturn {
@@ -74,6 +74,11 @@ export const usePoseTracking = (): UsePoseTrackingReturn => {
   }, [isActive, isInitializing, onResults]);
 
   const stop = useCallback(() => {
+    console.log('usePoseTracking.stop() called');
+    
+    // Always try to stop global stream first
+    stopAllCameraStreams();
+    
     if (poseService.current) {
       poseService.current.stop();
       poseService.current = null;
@@ -88,11 +93,29 @@ export const usePoseTracking = (): UsePoseTrackingReturn => {
       videoRef.current = null;
     }
     
+    // Also find and stop any orphaned video elements with streams
+    const allVideos = document.querySelectorAll('video');
+    allVideos.forEach(video => {
+      if (video.srcObject) {
+        console.log('Found orphaned video with stream, stopping...');
+        const stream = video.srcObject as MediaStream;
+        stream.getTracks().forEach(track => {
+          console.log('Stopping orphaned track:', track.kind, track.readyState);
+          track.stop();
+        });
+        video.srcObject = null;
+        if (video.parentNode) {
+          video.parentNode.removeChild(video);
+        }
+      }
+    });
+    
     rawLandmarks.current = null;
     hasReceivedFirstResult.current = false;
     setIsActive(false);
     setIsReady(false);
     setPermissionError(null);
+    console.log('usePoseTracking.stop() completed');
   }, []);
 
   return {

@@ -1,9 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { GameStatus, Beatmap } from '../../types';
 import { DEFAULT_BEATMAP } from '../../constants';
 import { useBeatmaps } from '../../hooks/useBeatmaps';
-import GameCanvas from './GameCanvas';
+import GameCanvas, { GameCanvasHandle } from './GameCanvas';
 import GameOverScreen from './GameOverScreen';
 
 const GamePage: React.FC = () => {
@@ -19,6 +19,7 @@ const GamePage: React.FC = () => {
   const [gameStatus, setGameStatus] = useState<GameStatus>('playing');
   const [finalScore, setFinalScore] = useState(0);
   const hasCalibrated = useRef(false);
+  const gameCanvasRef = useRef<GameCanvasHandle>(null);
 
   const handleCalibrationComplete = () => {
     hasCalibrated.current = true;
@@ -38,13 +39,16 @@ const GamePage: React.FC = () => {
     setGameStatus('calibration');
   };
 
-  const handleBackToBeatmapSelect = () => {
+  const handleBackToBeatmapSelect = useCallback(() => {
+    // Stop pose detection before navigating
+    gameCanvasRef.current?.stopPoseDetection();
     navigate('/select');
-  };
+  }, [navigate]);
 
   return (
     <div className="w-full h-screen bg-black overflow-hidden relative selection:bg-[#00f3ff] selection:text-black">
       <GameCanvas 
+        ref={gameCanvasRef}
         gameStatus={gameStatus} 
         setGameStatus={setGameStatus}
         onGameOver={handleGameOver}
