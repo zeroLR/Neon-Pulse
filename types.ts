@@ -40,12 +40,29 @@ export interface BlockNote {
   color?: BlockType;       // Override color (default: derived from track)
 }
 
+// A group of notes that appear simultaneously (at the exact same time)
+export interface NoteGroup {
+  notes: (string | BlockNote)[];  // All notes in this group appear at the same time
+}
+
+// Helper type for a single note item (string or BlockNote)
+export type SingleNote = string | BlockNote;
+
+// Helper type for items within a beat (can be single note, note group, or legacy array)
+export type BeatItem = SingleNote | NoteGroup;
+
 // Beatmap beat data types
+// Structure:
+//   null                    -> Rest (no block)
+//   "L1"                    -> Single note (legacy)
+//   { track: "L1", ... }    -> Single note with options (legacy)
+//   { notes: ["L1", "R1"] } -> A group of notes appearing simultaneously
+//   [item1, item2, ...]     -> Multiple items in one beat, spaced as sub-beats (1/n)
 export type BeatData = 
   | null                   // Rest (no block)
-  | string                 // Simple track label
-  | BlockNote              // Single block with options
-  | (string | BlockNote)[]; // Multiple blocks
+  | SingleNote             // Single note (string or BlockNote)
+  | NoteGroup              // A group of simultaneous notes
+  | BeatItem[];            // Multiple items (notes or groups) spread across sub-beats
 
 export interface Point {
   x: number;
