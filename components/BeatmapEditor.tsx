@@ -4,7 +4,7 @@ import {
   ArrowLeft, Play, Pause, Plus, Trash2, Download, Upload, 
   Save, Music, ChevronDown, ChevronUp, Volume2, VolumeX,
   SkipBack, SkipForward, Copy, Eye, EyeOff, Menu, X,
-  Settings, List, Edit3, GripVertical
+  Settings, List, Edit3, GripVertical, Check
 } from 'lucide-react';
 import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection, NoteGroup, SingleNote, BeatItem } from '../types';
 import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS, isNoteGroup } from '../constants';
@@ -880,6 +880,8 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
   };
   
   // Save to storage
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  
   const handleSave = async () => {
     const rawBeatmap: RawBeatmap = {
       id: getSaveId(),
@@ -895,7 +897,10 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
     
     const beatmap = processBeatmap(rawBeatmap);
     await beatmapStorage.save(beatmap);
-    alert(`Beatmap saved${isBuiltIn ? ' as a new custom beatmap' : ''}!`);
+    
+    // Show success feedback
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 1500);
   };
   
   // Import beatmap
@@ -988,10 +993,14 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
           </button>
           <button
             onClick={handleSave}
-            className="flex items-center gap-1 px-3 py-2 bg-cyan-600 hover:bg-cyan-500 rounded transition-colors"
+            className={`flex items-center gap-1 px-3 py-2 rounded transition-colors ${
+              saveSuccess 
+                ? 'bg-green-600 hover:bg-green-500' 
+                : 'bg-cyan-600 hover:bg-cyan-500'
+            }`}
           >
-            <Save size={16} />
-            Save
+            {saveSuccess ? <Check size={16} /> : <Save size={16} />}
+            {saveSuccess ? 'Saved!' : 'Save'}
           </button>
         </div>
         
@@ -999,9 +1008,13 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
         <div className="flex md:hidden gap-2">
           <button
             onClick={handleSave}
-            className="p-2 bg-cyan-600 hover:bg-cyan-500 rounded transition-colors"
+            className={`p-2 rounded transition-colors ${
+              saveSuccess 
+                ? 'bg-green-600 hover:bg-green-500' 
+                : 'bg-cyan-600 hover:bg-cyan-500'
+            }`}
           >
-            <Save size={18} />
+            {saveSuccess ? <Check size={18} /> : <Save size={18} />}
           </button>
           <button
             onClick={() => setShowMobileMenu(!showMobileMenu)}
