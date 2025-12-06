@@ -1378,10 +1378,75 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
             </h3>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4">
-            {/* Current Beat Structure */}
-            <div className="mb-4">
-              <h4 className="text-sm text-gray-400 mb-2">Beat Structure</h4>
+          <div className="flex-1 flex flex-col overflow-hidden p-4">
+            {/* Add Note Section - Fixed at top */}
+            <div className="flex-shrink-0 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm text-gray-400">Add Note</h4>
+                <span className="text-xs text-gray-500">
+                  {selectedSubBeat !== null 
+                    ? `→ Group #${selectedSubBeat + 1}` 
+                    : '→ New sub-beat'}
+                </span>
+              </div>
+              
+              {/* Track Grid */}
+              <div className="bg-gray-800 rounded-lg p-3 mb-3">
+                <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 1fr)' }}>
+                  <TrackButton track="L1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L1')} />
+                  <TrackButton track="T1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'T1')} />
+                  <TrackButton track="T2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'T2')} />
+                  <TrackButton track="R1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R1')} />
+                  
+                  <TrackButton track="L2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L2')} />
+                  <div />
+                  <div />
+                  <TrackButton track="R2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R2')} />
+                  
+                  <TrackButton track="L3" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L3')} />
+                  <div />
+                  <div />
+                  <TrackButton track="R3" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R3')} />
+                  
+                  <TrackButton track="L4" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L4')} />
+                  <TrackButton track="B1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'B1')} />
+                  <TrackButton track="B2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'B2')} />
+                  <TrackButton track="R4" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R4')} />
+                </div>
+              </div>
+              
+              {/* Add Group Button */}
+              <button
+                onClick={() => addGroupToBeat(selectedMeasure, selectedBeat)}
+                className="w-full py-2 mb-2 text-yellow-400 border border-yellow-400/50 rounded hover:bg-yellow-400/10 transition-colors text-sm flex items-center justify-center gap-2"
+              >
+                <Plus size={14} />
+                Add New Group (Simultaneous Notes)
+              </button>
+              
+              {/* Deselect Group */}
+              {selectedSubBeat !== null && (
+                <button
+                  onClick={() => setSelectedSubBeat(null)}
+                  className="w-full py-2 mb-2 text-gray-400 border border-gray-600 rounded hover:bg-gray-700 transition-colors text-sm"
+                >
+                  Deselect Group (Add as new sub-beat)
+                </button>
+              )}
+              
+              {/* Clear Beat */}
+              <button
+                onClick={() => { updateBeat(selectedMeasure, selectedBeat, null); setSelectedSubBeat(null); }}
+                className="w-full py-2 text-red-400 border border-red-400/50 rounded hover:bg-red-400/10 transition-colors text-sm"
+              >
+                Clear Beat
+              </button>
+            </div>
+            
+            {/* Current Beat Structure - Scrollable */}
+            <div className="flex-1 min-h-0 flex flex-col">
+              <h4 className="text-sm text-gray-400 mb-2 flex-shrink-0">Beat Structure</h4>
+              <div className="flex-1 overflow-y-auto">
               {(() => {
                 const currentBeat = measures[selectedMeasure]?.[selectedBeat];
                 const items = getBeatItems(currentBeat);
@@ -1462,70 +1527,7 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
                   </div>
                 );
               })()}
-            </div>
-            
-            {/* Add Note Section */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm text-gray-400">Add Note</h4>
-                <span className="text-xs text-gray-500">
-                  {selectedSubBeat !== null 
-                    ? `→ Group #${selectedSubBeat + 1}` 
-                    : '→ New sub-beat'}
-                </span>
               </div>
-              
-              {/* Track Grid */}
-              <div className="bg-gray-800 rounded-lg p-3 mb-3">
-                <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 1fr)' }}>
-                  <TrackButton track="L1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L1')} />
-                  <TrackButton track="T1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'T1')} />
-                  <TrackButton track="T2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'T2')} />
-                  <TrackButton track="R1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R1')} />
-                  
-                  <TrackButton track="L2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L2')} />
-                  <div />
-                  <div />
-                  <TrackButton track="R2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R2')} />
-                  
-                  <TrackButton track="L3" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L3')} />
-                  <div />
-                  <div />
-                  <TrackButton track="R3" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R3')} />
-                  
-                  <TrackButton track="L4" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L4')} />
-                  <TrackButton track="B1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'B1')} />
-                  <TrackButton track="B2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'B2')} />
-                  <TrackButton track="R4" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R4')} />
-                </div>
-              </div>
-              
-              {/* Add Group Button */}
-              <button
-                onClick={() => addGroupToBeat(selectedMeasure, selectedBeat)}
-                className="w-full py-2 mb-2 text-yellow-400 border border-yellow-400/50 rounded hover:bg-yellow-400/10 transition-colors text-sm flex items-center justify-center gap-2"
-              >
-                <Plus size={14} />
-                Add New Group (Simultaneous Notes)
-              </button>
-              
-              {/* Deselect Group */}
-              {selectedSubBeat !== null && (
-                <button
-                  onClick={() => setSelectedSubBeat(null)}
-                  className="w-full py-2 mb-2 text-gray-400 border border-gray-600 rounded hover:bg-gray-700 transition-colors text-sm"
-                >
-                  Deselect Group (Add as new sub-beat)
-                </button>
-              )}
-              
-              {/* Clear Beat */}
-              <button
-                onClick={() => { updateBeat(selectedMeasure, selectedBeat, null); setSelectedSubBeat(null); }}
-                className="w-full py-2 text-red-400 border border-red-400/50 rounded hover:bg-red-400/10 transition-colors text-sm"
-              >
-                Clear Beat
-              </button>
             </div>
           </div>
         </div>
