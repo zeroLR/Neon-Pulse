@@ -6,8 +6,8 @@ import {
   SkipBack, SkipForward, Copy, Eye, EyeOff, Menu, X,
   Settings, List, Edit3, GripVertical
 } from 'lucide-react';
-import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection } from '../types';
-import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS } from '../constants';
+import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection, NoteGroup, SingleNote, BeatItem } from '../types';
+import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS, isNoteGroup } from '../constants';
 import { beatmapStorage, processBeatmap, RawBeatmap } from '../services/beatmapStorage';
 import { createBlockMesh } from '../utils/threeHelpers';
 
@@ -65,6 +65,7 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
   // Editor state
   const [selectedMeasure, setSelectedMeasure] = useState(0);
   const [selectedBeat, setSelectedBeat] = useState(0);
+  const [selectedSubBeat, setSelectedSubBeat] = useState<number | null>(null); // Which sub-beat/group to edit (null = add new)
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentPlayBeat, setCurrentPlayBeat] = useState(0);
@@ -577,61 +578,153 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
     setMeasures(newMeasures);
   };
   
+  // Get structured beat items (sub-beats)
+  const getBeatItems = (beat: BeatData): BeatItem[] => {
+    if (beat === null) return [];
+    if (Array.isArray(beat)) return beat as BeatItem[];
+    return [beat as BeatItem];
+  };
+  
+  // Add a note to a specific sub-beat group, or create a new sub-beat
   const addNoteToBeat = (measureIndex: number, beatIndex: number, track: string, direction: SlashDirection = 'any') => {
     const currentBeat = measures[measureIndex][beatIndex];
     const newNote: BlockNote = { track, direction, color: getTrackType(track) };
     
     if (currentBeat === null) {
+      // Empty beat - add single note
       updateBeat(measureIndex, beatIndex, newNote);
+      return;
+    }
+    
+    if (selectedSubBeat === null) {
+      // Add as new sub-beat (single note)
+      if (Array.isArray(currentBeat)) {
+        updateBeat(measureIndex, beatIndex, [...currentBeat, newNote]);
+      } else {
+        updateBeat(measureIndex, beatIndex, [currentBeat as BeatItem, newNote]);
+      }
+    } else {
+      // Add to existing sub-beat group
+      const items = getBeatItems(currentBeat);
+      const newItems = [...items];
+      const targetItem = newItems[selectedSubBeat];
+      
+      if (isNoteGroup(targetItem)) {
+        // Add to existing group
+        newItems[selectedSubBeat] = { notes: [...targetItem.notes, newNote] };
+      } else {
+        // Convert single note to group
+        newItems[selectedSubBeat] = { notes: [targetItem as SingleNote, newNote] };
+      }
+      
+      updateBeat(measureIndex, beatIndex, newItems.length === 1 ? newItems[0] : newItems);
+    }
+  };
+  
+  // Add a new empty group (NoteGroup) to the beat
+  const addGroupToBeat = (measureIndex: number, beatIndex: number) => {
+    const currentBeat = measures[measureIndex][beatIndex];
+    const emptyGroup: NoteGroup = { notes: [] };
+    
+    if (currentBeat === null) {
+      updateBeat(measureIndex, beatIndex, emptyGroup);
+      setSelectedSubBeat(0);
     } else if (Array.isArray(currentBeat)) {
-      updateBeat(measureIndex, beatIndex, [...currentBeat, newNote]);
+      updateBeat(measureIndex, beatIndex, [...currentBeat, emptyGroup]);
+      setSelectedSubBeat(currentBeat.length);
     } else {
-      updateBeat(measureIndex, beatIndex, [currentBeat, newNote]);
+      updateBeat(measureIndex, beatIndex, [currentBeat as BeatItem, emptyGroup]);
+      setSelectedSubBeat(1);
     }
   };
   
-  const removeNoteFromBeat = (measureIndex: number, beatIndex: number, noteIndex: number) => {
+  // Remove a sub-beat item
+  const removeSubBeat = (measureIndex: number, beatIndex: number, subBeatIndex: number) => {
     const currentBeat = measures[measureIndex][beatIndex];
-    
-    if (Array.isArray(currentBeat)) {
-      const newNotes = currentBeat.filter((_, i) => i !== noteIndex);
-      if (newNotes.length === 0) {
-        updateBeat(measureIndex, beatIndex, null);
-      } else if (newNotes.length === 1) {
-        updateBeat(measureIndex, beatIndex, newNotes[0]);
-      } else {
-        updateBeat(measureIndex, beatIndex, newNotes);
-      }
-    } else {
+    if (!Array.isArray(currentBeat)) {
       updateBeat(measureIndex, beatIndex, null);
+      setSelectedSubBeat(null);
+      return;
     }
-  };
-  
-  const updateNoteDirection = (measureIndex: number, beatIndex: number, noteIndex: number, direction: SlashDirection) => {
-    const currentBeat = measures[measureIndex][beatIndex];
     
-    if (Array.isArray(currentBeat)) {
-      const newNotes = [...currentBeat];
-      const note = newNotes[noteIndex];
-      if (typeof note === 'string') {
-        newNotes[noteIndex] = { track: note, direction, color: getTrackType(note) };
+    const newItems = currentBeat.filter((_, i) => i !== subBeatIndex);
+    if (newItems.length === 0) {
+      updateBeat(measureIndex, beatIndex, null);
+    } else if (newItems.length === 1) {
+      updateBeat(measureIndex, beatIndex, newItems[0]);
+    } else {
+      updateBeat(measureIndex, beatIndex, newItems);
+    }
+    setSelectedSubBeat(null);
+  };
+  
+  // Remove a note from a specific sub-beat
+  const removeNoteFromBeat = (measureIndex: number, beatIndex: number, subBeatIndex: number, noteIndex: number) => {
+    const currentBeat = measures[measureIndex][beatIndex];
+    const items = getBeatItems(currentBeat);
+    const targetItem = items[subBeatIndex];
+    
+    if (isNoteGroup(targetItem)) {
+      const newNotes = targetItem.notes.filter((_, i) => i !== noteIndex);
+      if (newNotes.length === 0) {
+        removeSubBeat(measureIndex, beatIndex, subBeatIndex);
       } else {
-        newNotes[noteIndex] = { ...note, direction };
+        const newItems = [...items];
+        newItems[subBeatIndex] = { notes: newNotes };
+        updateBeat(measureIndex, beatIndex, newItems.length === 1 ? newItems[0] : newItems);
       }
-      updateBeat(measureIndex, beatIndex, newNotes);
-    } else if (currentBeat !== null) {
-      if (typeof currentBeat === 'string') {
-        updateBeat(measureIndex, beatIndex, { track: currentBeat, direction, color: getTrackType(currentBeat) });
-      } else {
-        updateBeat(measureIndex, beatIndex, { ...currentBeat, direction });
-      }
+    } else {
+      // Single note item
+      removeSubBeat(measureIndex, beatIndex, subBeatIndex);
     }
   };
   
-  // Get notes from beat data
+  const updateNoteDirection = (measureIndex: number, beatIndex: number, subBeatIndex: number, noteIndex: number, direction: SlashDirection) => {
+    const currentBeat = measures[measureIndex][beatIndex];
+    const items = getBeatItems(currentBeat);
+    const targetItem = items[subBeatIndex];
+    
+    const updateNote = (note: string | BlockNote): BlockNote => {
+      if (typeof note === 'string') {
+        return { track: note, direction, color: getTrackType(note) };
+      }
+      return { ...note, direction };
+    };
+    
+    if (isNoteGroup(targetItem)) {
+      const newNotes = [...targetItem.notes];
+      newNotes[noteIndex] = updateNote(newNotes[noteIndex]);
+      const newItems = [...items];
+      newItems[subBeatIndex] = { notes: newNotes };
+      updateBeat(measureIndex, beatIndex, newItems.length === 1 ? newItems[0] : newItems);
+    } else {
+      // Single note
+      const newItems = [...items];
+      newItems[subBeatIndex] = updateNote(targetItem as SingleNote);
+      updateBeat(measureIndex, beatIndex, newItems.length === 1 ? newItems[0] : newItems);
+    }
+  };
+  
+  // Get notes from beat data (flattens all notes from all groups/items)
   const getNotesFromBeat = (beat: BeatData): (string | BlockNote)[] => {
     if (beat === null) return [];
-    if (Array.isArray(beat)) return beat;
+    if (Array.isArray(beat)) {
+      // Array of items - flatten all notes from each item
+      const notes: (string | BlockNote)[] = [];
+      for (const item of beat) {
+        if (isNoteGroup(item as BeatItem)) {
+          notes.push(...(item as NoteGroup).notes);
+        } else {
+          notes.push(item as string | BlockNote);
+        }
+      }
+      return notes;
+    }
+    if (isNoteGroup(beat)) {
+      // Single NoteGroup - return all notes
+      return beat.notes;
+    }
+    // Single note
     return [beat];
   };
   
@@ -1163,38 +1256,83 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
           </div>
           
           <div className="flex-1 overflow-y-auto p-4">
-            {/* Current Notes */}
+            {/* Current Beat Structure */}
             <div className="mb-4">
-              <h4 className="text-sm text-gray-400 mb-2">Current Notes</h4>
+              <h4 className="text-sm text-gray-400 mb-2">Beat Structure</h4>
               {(() => {
-                const notes = getNotesFromBeat(measures[selectedMeasure]?.[selectedBeat]);
-                if (notes.length === 0) {
-                  return <div className="text-gray-600 text-sm italic">No notes</div>;
+                const currentBeat = measures[selectedMeasure]?.[selectedBeat];
+                const items = getBeatItems(currentBeat);
+                
+                if (items.length === 0) {
+                  return <div className="text-gray-600 text-sm italic">Empty beat</div>;
                 }
+                
                 return (
                   <div className="space-y-2">
-                    {notes.map((note, noteIndex) => {
-                      const track = typeof note === 'string' ? note : note.track;
-                      const direction = typeof note === 'string' ? 'any' : (note.direction || 'any');
+                    {items.map((item, subBeatIndex) => {
+                      const isGroup = isNoteGroup(item);
+                      const notes = isGroup ? (item as NoteGroup).notes : [item as SingleNote];
+                      const isSelected = selectedSubBeat === subBeatIndex;
                       
                       return (
-                        <div key={noteIndex} className="flex items-center gap-2 p-2 bg-gray-800 rounded">
-                          <span className="font-mono text-sm flex-1">{track}</span>
-                          <select
-                            value={direction}
-                            onChange={(e) => updateNoteDirection(selectedMeasure, selectedBeat, noteIndex, e.target.value as SlashDirection)}
-                            className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm"
-                          >
-                            {DIRECTIONS.map(d => (
-                              <option key={d} value={d}>{DIRECTION_ARROWS[d]} {d}</option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={() => removeNoteFromBeat(selectedMeasure, selectedBeat, noteIndex)}
-                            className="p-1 text-red-400 hover:text-red-300"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                        <div 
+                          key={subBeatIndex}
+                          className={`border rounded-lg p-2 transition-colors cursor-pointer ${
+                            isSelected 
+                              ? 'border-cyan-400 bg-cyan-900/20' 
+                              : 'border-gray-700 bg-gray-800/50 hover:border-gray-500'
+                          }`}
+                          onClick={() => setSelectedSubBeat(isSelected ? null : subBeatIndex)}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs text-gray-500">
+                              {items.length > 1 ? `1/${items.length} beat #${subBeatIndex + 1}` : 'Full beat'}
+                              {isGroup && <span className="ml-1 text-yellow-400">(Group)</span>}
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); removeSubBeat(selectedMeasure, selectedBeat, subBeatIndex); }}
+                              className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            {notes.map((note, noteIndex) => {
+                              const track = typeof note === 'string' ? note : (note as BlockNote).track;
+                              const direction = typeof note === 'string' ? 'any' : ((note as BlockNote).direction || 'any');
+                              const isLeft = track.startsWith('L');
+                              const isRight = track.startsWith('R');
+                              
+                              return (
+                                <div key={noteIndex} className="flex items-center gap-2 p-1.5 bg-gray-700/50 rounded">
+                                  <span className={`font-mono text-xs px-1.5 py-0.5 rounded ${
+                                    isLeft ? 'bg-cyan-600/50 text-cyan-200' : 
+                                    isRight ? 'bg-pink-600/50 text-pink-200' : 
+                                    'bg-purple-600/50 text-purple-200'
+                                  }`}>
+                                    {track}
+                                  </span>
+                                  <select
+                                    value={direction}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => updateNoteDirection(selectedMeasure, selectedBeat, subBeatIndex, noteIndex, e.target.value as SlashDirection)}
+                                    className="px-1 py-0.5 bg-gray-600 border border-gray-500 rounded text-xs flex-1"
+                                  >
+                                    {DIRECTIONS.map(d => (
+                                      <option key={d} value={d}>{DIRECTION_ARROWS[d]} {d}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); removeNoteFromBeat(selectedMeasure, selectedBeat, subBeatIndex, noteIndex); }}
+                                    className="p-0.5 text-red-400 hover:text-red-300"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       );
                     })}
@@ -1203,32 +1341,35 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
               })()}
             </div>
             
-            {/* Add Note */}
-            <div>
-              <h4 className="text-sm text-gray-400 mb-2">Add Note</h4>
+            {/* Add Note Section */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm text-gray-400">Add Note</h4>
+                <span className="text-xs text-gray-500">
+                  {selectedSubBeat !== null 
+                    ? `→ Group #${selectedSubBeat + 1}` 
+                    : '→ New sub-beat'}
+                </span>
+              </div>
               
-              {/* Track Grid - Visual representation of 12-track layout */}
-              <div className="bg-gray-800 rounded-lg p-4 mb-3">
-                <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 1fr)' }}>
-                  {/* Row 1: L1, T1, T2, R1 */}
+              {/* Track Grid */}
+              <div className="bg-gray-800 rounded-lg p-3 mb-3">
+                <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 1fr)' }}>
                   <TrackButton track="L1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L1')} />
                   <TrackButton track="T1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'T1')} />
                   <TrackButton track="T2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'T2')} />
                   <TrackButton track="R1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R1')} />
                   
-                  {/* Row 2: L2, empty, empty, R2 */}
                   <TrackButton track="L2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L2')} />
                   <div />
                   <div />
                   <TrackButton track="R2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R2')} />
                   
-                  {/* Row 3: L3, empty, empty, R3 */}
                   <TrackButton track="L3" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L3')} />
                   <div />
                   <div />
                   <TrackButton track="R3" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'R3')} />
                   
-                  {/* Row 4: L4, B1, B2, R4 */}
                   <TrackButton track="L4" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'L4')} />
                   <TrackButton track="B1" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'B1')} />
                   <TrackButton track="B2" onClick={() => addNoteToBeat(selectedMeasure, selectedBeat, 'B2')} />
@@ -1236,10 +1377,29 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
                 </div>
               </div>
               
-              {/* Quick Clear */}
+              {/* Add Group Button */}
               <button
-                onClick={() => updateBeat(selectedMeasure, selectedBeat, null)}
-                className="w-full py-2 md:py-2 text-red-400 border border-red-400/50 rounded hover:bg-red-400/10 transition-colors text-sm"
+                onClick={() => addGroupToBeat(selectedMeasure, selectedBeat)}
+                className="w-full py-2 mb-2 text-yellow-400 border border-yellow-400/50 rounded hover:bg-yellow-400/10 transition-colors text-sm flex items-center justify-center gap-2"
+              >
+                <Plus size={14} />
+                Add New Group (Simultaneous Notes)
+              </button>
+              
+              {/* Deselect Group */}
+              {selectedSubBeat !== null && (
+                <button
+                  onClick={() => setSelectedSubBeat(null)}
+                  className="w-full py-2 mb-2 text-gray-400 border border-gray-600 rounded hover:bg-gray-700 transition-colors text-sm"
+                >
+                  Deselect Group (Add as new sub-beat)
+                </button>
+              )}
+              
+              {/* Clear Beat */}
+              <button
+                onClick={() => { updateBeat(selectedMeasure, selectedBeat, null); setSelectedSubBeat(null); }}
+                className="w-full py-2 text-red-400 border border-red-400/50 rounded hover:bg-red-400/10 transition-colors text-sm"
               >
                 Clear Beat
               </button>

@@ -1,5 +1,5 @@
 
-import { BlockNote, BlockType, SlashDirection, BeatData, Beatmap } from './types';
+import { BlockNote, BlockType, SlashDirection, BeatData, Beatmap, NoteGroup, SingleNote, BeatItem } from './types';
 
 export const GAME_CONFIG = {
   ASPECT_RATIO: 16 / 9,
@@ -195,6 +195,19 @@ export const parseBeatNote = (data: string | BlockNote): BlockNote => {
   };
 };
 
+// Helper to check if an item is a NoteGroup (simultaneous notes)
+export const isNoteGroup = (item: BeatItem): item is NoteGroup => {
+  return typeof item === 'object' && item !== null && 'notes' in item && Array.isArray((item as NoteGroup).notes);
+};
+
+// Helper to get all notes from a BeatItem (handles both single notes and groups)
+export const getNotesFromBeatItem = (item: BeatItem): BlockNote[] => {
+  if (isNoteGroup(item)) {
+    return item.notes.map(n => parseBeatNote(n));
+  }
+  return [parseBeatNote(item as SingleNote)];
+};
+
 // Direction arrow mapping for UI display
 export const DIRECTION_ARROWS: Record<SlashDirection, string> = {
   'up': '↑',
@@ -231,8 +244,19 @@ const countNotes = (data: BeatData[][]): number => {
     for (const beat of measure) {
       if (beat === null) continue;
       if (Array.isArray(beat)) {
-        count += beat.length;
+        // Array of items - count notes in each item
+        for (const item of beat) {
+          if (isNoteGroup(item as BeatItem)) {
+            count += (item as NoteGroup).notes.length;
+          } else {
+            count += 1;
+          }
+        }
+      } else if (isNoteGroup(beat)) {
+        // Single NoteGroup
+        count += beat.notes.length;
       } else {
+        // Single note
         count += 1;
       }
     }

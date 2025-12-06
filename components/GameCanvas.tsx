@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote } from '../constants';
-import { BlockNote, BeatData, Beatmap } from '../types';
+import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote, isNoteGroup, getNotesFromBeatItem } from '../constants';
+import { BlockNote, BeatData, Beatmap, BeatItem } from '../types';
 
 // Hooks
 import { 
@@ -278,6 +278,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const currentBeatIndex = Math.max(0, Math.floor(effectiveGameTime / beatInterval));
     const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
     
+    // Helper to spawn all notes from a BeatItem at given timing
+    const spawnBeatItem = (item: BeatItem, timing: number) => {
+      const notes = getNotesFromBeatItem(item);
+      for (const note of notes) {
+        spawnSingleBlock(note, gameTime, timing);
+      }
+    };
+    
     while (spawnedBeatIndex.current <= targetSpawnIndex) {
       const beatIndex = spawnedBeatIndex.current;
       const beatData = getBeatDataAtIndex(beatIndex);
@@ -294,13 +302,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const beatsAhead = beatIndex - currentBeatIndex;
       
       if (Array.isArray(beatData)) {
-        // Offset multi-notes evenly within the beat (2 notes = 1/2, 3 notes = 1/3, etc.)
+        // Array of items: spread across sub-beats (2 items = 1/2, 3 items = 1/3, etc.)
         const subBeatOffset = 1 / beatData.length;
         for (let i = 0; i < beatData.length; i++) {
-          const note = parseBeatNote(beatData[i]);
-          spawnSingleBlock(note, gameTime, beatsAhead + (i * subBeatOffset));
+          spawnBeatItem(beatData[i] as BeatItem, beatsAhead + (i * subBeatOffset));
+        }
+      } else if (isNoteGroup(beatData)) {
+        // NoteGroup: all notes appear simultaneously
+        const notes = beatData.notes.map(n => parseBeatNote(n));
+        for (const note of notes) {
+          spawnSingleBlock(note, gameTime, beatsAhead);
         }
       } else {
+        // Single note (string or BlockNote)
         const note = parseBeatNote(beatData);
         spawnSingleBlock(note, gameTime, beatsAhead);
       }
