@@ -82,8 +82,8 @@ export const GAME_CONFIG = {
   
   // Trail Configuration
   TRAIL: {
-    LENGTH: 5,           // Number of trail segments (higher = longer trail)
-    BASE_OPACITY: 0.75,    // Maximum opacity at the newest point (0-1)
+    LENGTH: 3,           // Number of trail segments (higher = longer trail)
+    BASE_OPACITY: 0.9,    // Maximum opacity at the newest point (0-1)
     FADE_EXPONENT: 1.0,   // Controls how quickly trail fades (higher = faster fade)
     LEFT_COLOR: 0x00f3ff, // Cyan for left saber
     RIGHT_COLOR: 0xff00ff, // Magenta for right saber
