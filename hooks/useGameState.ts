@@ -111,9 +111,10 @@ export const useGameState = (): GameStateAPI => {
       if (count > 0) {
         setCountdown(count);
       } else {
-        setCountdown(null);
+        // Set isGameActive BEFORE setCountdown so the effect sees the correct value
         isGameActive.current = true;
         if (countdownTimer.current) clearInterval(countdownTimer.current);
+        setCountdown(null);
       }
     }, 1000);
   }, []);

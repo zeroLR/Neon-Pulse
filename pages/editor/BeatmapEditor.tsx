@@ -895,8 +895,7 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
       data: measures,
     };
     
-    const beatmap = processBeatmap(rawBeatmap);
-    await beatmapStorage.save(beatmap);
+    await beatmapStorage.save(rawBeatmap);
     
     // Show success feedback
     setSaveSuccess(true);
