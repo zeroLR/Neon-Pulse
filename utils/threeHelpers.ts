@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GAME_CONFIG } from '../constants';
 import { BlockType } from '../types';
 
-export const TRAIL_LENGTH = 20;
+// Trail length from config
+export const TRAIL_LENGTH = GAME_CONFIG.TRAIL.LENGTH;
 
 /**
  * Create a block mesh with neon wireframe style
@@ -125,15 +126,17 @@ export const createSaberMesh = (color: number): THREE.Group => {
 
 /**
  * Create trail mesh for saber
+ * @param color - Trail color (hex number)
  */
 export const createTrailMesh = (color: number): THREE.Mesh => {
-  const vertexCount = TRAIL_LENGTH * 2;
+  const trailLength = GAME_CONFIG.TRAIL.LENGTH;
+  const vertexCount = trailLength * 2;
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(vertexCount * 3);
   const alphas = new Float32Array(vertexCount);
   
   const indices = [];
-  for (let i = 0; i < TRAIL_LENGTH - 1; i++) {
+  for (let i = 0; i < trailLength - 1; i++) {
     const v = i * 2;
     indices.push(v, v + 1, v + 2);
     indices.push(v + 2, v + 1, v + 3);
@@ -195,14 +198,17 @@ export const updateTrail = (
   const tip = saberGroup.position.clone().add(bladeTipOffset);
 
   history.unshift({ base, tip });
-  if (history.length > TRAIL_LENGTH) {
+  const trailLength = GAME_CONFIG.TRAIL.LENGTH;
+  if (history.length > trailLength) {
     history.pop();
   }
 
   const positions = mesh.geometry.attributes.position.array as Float32Array;
   const alphas = mesh.geometry.attributes.alpha.array as Float32Array;
+  const baseOpacity = GAME_CONFIG.TRAIL.BASE_OPACITY;
+  const fadeExponent = GAME_CONFIG.TRAIL.FADE_EXPONENT;
 
-  for (let i = 0; i < TRAIL_LENGTH; i++) {
+  for (let i = 0; i < trailLength; i++) {
     const point = history[i] || history[history.length - 1];
     if (!point) continue;
 
@@ -213,9 +219,11 @@ export const updateTrail = (
     positions[i * 6 + 4] = point.tip.y;
     positions[i * 6 + 5] = point.tip.z;
 
-    const alpha = 1.0 - (i / TRAIL_LENGTH);
-    alphas[i * 2] = alpha * 0.2;
-    alphas[i * 2 + 1] = alpha * 0.2;
+    // Apply fade with configurable exponent and base opacity
+    const t = i / trailLength;
+    const alpha = Math.pow(1.0 - t, fadeExponent) * baseOpacity;
+    alphas[i * 2] = alpha;
+    alphas[i * 2 + 1] = alpha;
   }
 
   mesh.geometry.attributes.position.needsUpdate = true;

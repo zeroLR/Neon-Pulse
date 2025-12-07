@@ -80,6 +80,15 @@ export const GAME_CONFIG = {
   // Default Saber Scale
   DEFAULT_SABER_SCALE: 3,
   
+  // Trail Configuration
+  TRAIL: {
+    LENGTH: 5,           // Number of trail segments (higher = longer trail)
+    BASE_OPACITY: 0.75,    // Maximum opacity at the newest point (0-1)
+    FADE_EXPONENT: 1.0,   // Controls how quickly trail fades (higher = faster fade)
+    LEFT_COLOR: 0x00f3ff, // Cyan for left saber
+    RIGHT_COLOR: 0xff00ff, // Magenta for right saber
+  },
+  
   // Default Trail Visibility
   DEFAULT_SHOW_TRAIL: true,
   

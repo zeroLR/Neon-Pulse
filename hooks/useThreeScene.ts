@@ -139,11 +139,11 @@ export const useThreeScene = (): UseThreeSceneReturn => {
     refs.current.rightSaber = rSaber;
 
     // Trails
-    const lTrail = createTrailMesh(GAME_CONFIG.COLORS.CYAN);
+    const lTrail = createTrailMesh(GAME_CONFIG.TRAIL.LEFT_COLOR);
     scene.add(lTrail);
     refs.current.leftTrail = lTrail;
 
-    const rTrail = createTrailMesh(GAME_CONFIG.COLORS.MAGENTA);
+    const rTrail = createTrailMesh(GAME_CONFIG.TRAIL.RIGHT_COLOR);
     scene.add(rTrail);
     refs.current.rightTrail = rTrail;
 
