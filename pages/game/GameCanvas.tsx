@@ -143,7 +143,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   // Game state refs
   const blocks = useRef<any[]>([]);
   const lastTime = useRef<number>(0);
-  const nextSpawnTime = useRef<number>(0);
+  const nextSpawnTime = useRef<number>(startDelay);
   const accumulatedGameTime = useRef<number>(0); // Total game time excluding pauses
   const lastUpdateTime = useRef<number>(0); // Last frame time for delta calculation
   const beatmapCompleted = useRef<boolean>(false);
@@ -195,7 +195,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     lastTime.current = now;
     lastUpdateTime.current = now;
     accumulatedGameTime.current = 0; // Reset accumulated time
-    nextSpawnTime.current = startDelay; // Use beatmap's startDelay
+    // Use beatmap's startDelay (read from beatmap prop directly)
+    const currentStartDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    nextSpawnTime.current = currentStartDelay;
     setIsPaused(false);
     nextTrackFlash.current = null;
     shakeIntensity.current = 0;
@@ -220,8 +222,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     if (startCountdownImmediately) {
       startCountdown();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [beatmap.startDelay, gameState, setIsPaused, currentMeasure, currentBeat, clearBlockMeshes, clearEffects, startCountdown]);
 
   // Spawn block helpers
   const getBeatDataAtIndex = (globalBeatIndex: number): BeatData | null => {
@@ -283,6 +284,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     const gameTime = accumulatedGameTime.current;
     if (gameTime < nextSpawnTime.current) return;
     if (beatmapCompleted.current) return;
+
     
     const beatInterval = 60000 / beatmap.bpm;
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
@@ -397,7 +399,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     }
 
     // Gameplay
-    if (gameStatus === 'playing' && !isPaused && isGameActive.current) {
+    if (gameStatus === 'playing' && !isPaused && isGameActive.current ) {
       spawnBlock();
       
       if (beatmapCompleted.current) {
@@ -641,12 +643,16 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameStatus, isPaused]);
 
-  // YouTube sync
+  // YouTube sync - start music when countdown ends
+  // Music should start immediately when game becomes active, blocks will arrive at HIT_Z after startDelay
   useEffect(() => {
     if (countdown === null && isGameActive.current && !isPaused && beatmap.youtubeId) {
+      console.log('YouTube sync: playing video, startDelay =', startDelay);
+      // Seek to 0 and play - the startDelay in beatmap determines when first beat arrives at HIT_Z
+      youtube.seekTo(0);
       youtube.playYouTube();
     }
-  }, [countdown, isPaused, beatmap.youtubeId, youtube, isGameActive]);
+  }, [countdown, isPaused, beatmap.youtubeId, youtube, isGameActive, startDelay]);
 
   // Cleanup on unmount
   useEffect(() => {
