@@ -17,7 +17,7 @@ const YouTubePlayer: React.FC<YouTubePlayerProps> = ({ beatmap, youtubePlayerRef
           id="youtube-player"
           width="280"
           height="158"
-          src={`https://www.youtube.com/embed/${beatmap.youtubeId}?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1`}
+          src={`https://www.youtube.com/embed/${beatmap.youtubeId}?playsinline=1&rel=0&modestbranding=1&enablejsapi=1`}
           title={beatmap.title}
           frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
