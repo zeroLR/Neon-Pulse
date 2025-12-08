@@ -42,7 +42,7 @@ export const GAME_CONFIG = {
   HIT_THRESHOLD: 2.0, // Legacy radius check
   VELOCITY_THRESHOLD: 0.1, // Reduced threshold for 3D velocity
   INITIAL_SPAWN_DELAY: 0, // ms before first block spawns
-  RETRY_DELAY: 600, // ms before restarting after game over
+  RETRY_DELAY: 300, // ms before restarting after game over
   
   // Hit Detection Zone
   HIT_ZONE: {
