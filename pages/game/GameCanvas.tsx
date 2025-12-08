@@ -188,7 +188,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   };
 
   // Initialize game (without starting countdown - that happens after camera is ready)
-  const initGame = useCallback((startCountdownImmediately: boolean = false) => {
+  const initGame = useCallback((startCountdownImmediately: boolean = false, retryDelay?: number) => {
     blocks.current = [];
     gameState.resetStats();
     const now = performance.now();
@@ -196,7 +196,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     lastUpdateTime.current = now;
     accumulatedGameTime.current = 0; // Reset accumulated time
     // Use beatmap's startDelay (read from beatmap prop directly)
-    const currentStartDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
+    const currentStartDelay = (beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY ) + (retryDelay ?? 0);
     nextSpawnTime.current = currentStartDelay;
     setIsPaused(false);
     nextTrackFlash.current = null;
@@ -645,14 +645,27 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
 
   // YouTube sync - start music when countdown ends
   // Music should start immediately when game becomes active, blocks will arrive at HIT_Z after startDelay
+  // Also reset game time here to ensure consistent timing between first start and retry
   useEffect(() => {
     if (countdown === null && isGameActive.current && !isPaused && beatmap.youtubeId) {
       console.log('YouTube sync: playing video, startDelay =', startDelay);
+      // Reset timing refs to ensure consistent start timing
+      accumulatedGameTime.current = 0;
+      lastUpdateTime.current = performance.now();
       // Seek to 0 and play - the startDelay in beatmap determines when first beat arrives at HIT_Z
       youtube.seekTo(0);
       youtube.playYouTube();
     }
   }, [countdown, isPaused, beatmap.youtubeId, youtube, isGameActive, startDelay]);
+
+  // Reset timing when countdown ends (for beatmaps without YouTube)
+  useEffect(() => {
+    if (countdown === null && isGameActive.current && !isPaused && !beatmap.youtubeId) {
+      // Reset timing refs to ensure consistent start timing
+      accumulatedGameTime.current = 0;
+      lastUpdateTime.current = performance.now();
+    }
+  }, [countdown, isPaused, beatmap.youtubeId, isGameActive]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -684,7 +697,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     setIsPaused(false);
     youtube.restartYouTube();
     // On retry, camera is already active, so start countdown immediately
-    initGame(true);
+    nextSpawnTime
+    initGame(true, 300);
   };
 
   const handleExit = () => {

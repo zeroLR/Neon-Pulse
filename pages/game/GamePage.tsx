@@ -8,13 +8,15 @@ import GameOverScreen from './GameOverScreen';
 
 const GamePage: React.FC = () => {
   const navigate = useNavigate();
-  const { beatmaps } = useBeatmaps();
+  const { beatmaps, isLoading } = useBeatmaps();
   
   // Get beatmap ID from URL params
   const { beatmapId } = useParams<{ beatmapId: string }>();
   
-  // Find the selected beatmap
-  const selectedBeatmap = beatmaps.find(b => b.id === beatmapId) || DEFAULT_BEATMAP;
+  // Find the selected beatmap (only after loading is complete)
+  const selectedBeatmap = !isLoading && beatmaps.length > 0 
+    ? (beatmaps.find(b => b.id === beatmapId) || DEFAULT_BEATMAP)
+    : null;
   
   const [gameStatus, setGameStatus] = useState<GameStatus>('playing');
   const [finalScore, setFinalScore] = useState(0);
@@ -44,6 +46,18 @@ const GamePage: React.FC = () => {
     gameCanvasRef.current?.stopPoseDetection();
     navigate('/select');
   }, [navigate]);
+
+  // Show loading screen while beatmaps are being fetched
+  if (isLoading || !selectedBeatmap) {
+    return (
+      <div className="w-full h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-[#00f3ff] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[#00f3ff] font-mono text-lg">Loading Beatmap...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-screen bg-black overflow-hidden relative selection:bg-[#00f3ff] selection:text-black">
