@@ -698,7 +698,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     youtube.restartYouTube();
     // On retry, camera is already active, so start countdown immediately
     nextSpawnTime
-    initGame(true, 300);
+    initGame(true, 650);
   };
 
   const handleExit = () => {
