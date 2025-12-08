@@ -6,8 +6,8 @@ export const GAME_CONFIG = {
   
   // 3D World Constants
   CAMERA_Z: 12, // Moved back for TPS
-  SPAWN_Z: -50, // Much deeper spawn for more immersion
-  HIT_Z: 120, 
+  SPAWN_Z: -60, // Much deeper spawn for more immersion
+  HIT_Z: 60, 
   DESPAWN_Z: 10, 
   
   // Camera Settings
@@ -38,10 +38,11 @@ export const GAME_CONFIG = {
   },
   
   // Gameplay
-  BLOCK_SPEED: 70, // Faster to cover the longer distance
+  BLOCK_SPEED: 10, // Faster to cover the longer distance
   HIT_THRESHOLD: 2.0, // Legacy radius check
   VELOCITY_THRESHOLD: 0.1, // Reduced threshold for 3D velocity
-  INITIAL_SPAWN_DELAY: 2500, // ms before first block spawns
+  INITIAL_SPAWN_DELAY: 0, // ms before first block spawns
+  RETRY_DELAY: 600, // ms before restarting after game over
   
   // Hit Detection Zone
   HIT_ZONE: {
@@ -54,7 +55,7 @@ export const GAME_CONFIG = {
   SPAWN: {
     SPREAD_FACTOR: 1.3, // How much blocks spread out at spawn
     TRACK_FLASH_DURATION: 300, // ms
-    LOOKAHEAD_BEATS: 10, // How many beats ahead to spawn blocks
+    LOOKAHEAD_BEATS: 8, // How many beats ahead to spawn blocks
   },
   
   // Visuals & Hitbox
@@ -104,7 +105,7 @@ export const GAME_CONFIG = {
   
   // Screen Flash
   SCREEN_FLASH: {
-    OPACITY: 0.05,
+    OPACITY: 0.03,
     DURATION: 60, // ms
   },
   

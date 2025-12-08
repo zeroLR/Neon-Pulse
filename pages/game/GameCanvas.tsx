@@ -649,23 +649,29 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   useEffect(() => {
     if (countdown === null && isGameActive.current && !isPaused && beatmap.youtubeId) {
       console.log('YouTube sync: playing video, startDelay =', startDelay);
-      // Reset timing refs to ensure consistent start timing
+      // Reset ALL timing and spawn refs to ensure consistent start timing
       accumulatedGameTime.current = 0;
       lastUpdateTime.current = performance.now();
+      spawnedBeatIndex.current = 0;
+      const currentStartDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
+      nextSpawnTime.current = currentStartDelay;
       // Seek to 0 and play - the startDelay in beatmap determines when first beat arrives at HIT_Z
       youtube.seekTo(0);
       youtube.playYouTube();
     }
-  }, [countdown, isPaused, beatmap.youtubeId, youtube, isGameActive, startDelay]);
+  }, [countdown, isPaused, beatmap.youtubeId, beatmap.startDelay, youtube, isGameActive, startDelay]);
 
   // Reset timing when countdown ends (for beatmaps without YouTube)
   useEffect(() => {
     if (countdown === null && isGameActive.current && !isPaused && !beatmap.youtubeId) {
-      // Reset timing refs to ensure consistent start timing
+      // Reset ALL timing and spawn refs to ensure consistent start timing
       accumulatedGameTime.current = 0;
       lastUpdateTime.current = performance.now();
+      spawnedBeatIndex.current = 0;
+      const currentStartDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
+      nextSpawnTime.current = currentStartDelay;
     }
-  }, [countdown, isPaused, beatmap.youtubeId, isGameActive]);
+  }, [countdown, isPaused, beatmap.youtubeId, beatmap.startDelay, isGameActive]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -698,7 +704,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     youtube.restartYouTube();
     // On retry, camera is already active, so start countdown immediately
     nextSpawnTime
-    initGame(true, 650);
+    initGame(true, GAME_CONFIG.RETRY_DELAY);
   };
 
   const handleExit = () => {
