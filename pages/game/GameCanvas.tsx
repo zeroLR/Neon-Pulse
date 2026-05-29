@@ -707,6 +707,18 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     initGame(true, GAME_CONFIG.RETRY_DELAY);
   };
 
+  // Live audio-vs-game-clock drift for the debug readout (ms).
+  // The music is seeked to 0 and the game clock reset to 0 at the same moment
+  // (countdown end), so they should track 1:1. A non-zero value is real drift.
+  // Positive = music ahead of game clock. Null when no sync source is available.
+  const getAudioDrift = useCallback((): number | null => {
+    if (!beatmap.youtubeId || !isGameActive.current || isPaused) return null;
+    const ytTime = youtube.getEstimatedTime();
+    if (ytTime === null) return null;
+    const gameTimeSec = accumulatedGameTime.current / 1000;
+    return (ytTime - gameTimeSec) * 1000;
+  }, [beatmap.youtubeId, isPaused, youtube, isGameActive]);
+
   const handleExit = () => {
     // Set flag to prevent camera restart during exit
     isExiting.current = true;
@@ -741,6 +753,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
         }}
         isOpen={isDebugOpen}
         setIsOpen={setIsDebugOpen}
+        getAudioDrift={getAudioDrift}
       />
 
       {gameStatus === 'calibration' && (

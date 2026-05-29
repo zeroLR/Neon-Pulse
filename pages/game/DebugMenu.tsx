@@ -1,6 +1,6 @@
 
-import React from 'react';
-import { Settings, Shield, Activity, Box, RefreshCw, Square, User, Sliders, Sparkles, Camera } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings, Shield, Activity, Box, RefreshCw, Square, User, Sliders, Sparkles, Camera, Timer } from 'lucide-react';
 import { DebugConfig } from '../../types';
 
 interface DebugMenuProps {
@@ -9,9 +9,41 @@ interface DebugMenuProps {
   onRecalibrate: () => void;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
+  /** Returns current audio-vs-game-clock drift in ms, or null if unavailable. */
+  getAudioDrift?: () => number | null;
 }
 
-const DebugMenu: React.FC<DebugMenuProps> = ({ config, onConfigChange, onRecalibrate, isOpen, setIsOpen }) => {
+// Live readout of the drift between the music position and the game clock.
+// Polls on an interval (the values live in refs, outside React state).
+const AudioDriftReadout: React.FC<{ getAudioDrift: () => number | null }> = ({ getAudioDrift }) => {
+  const [drift, setDrift] = useState<number | null>(null);
+
+  useEffect(() => {
+    const i = setInterval(() => setDrift(getAudioDrift()), 200);
+    return () => clearInterval(i);
+  }, [getAudioDrift]);
+
+  const abs = drift === null ? 0 : Math.abs(drift);
+  const color =
+    drift === null ? 'text-gray-500'
+    : abs < 20 ? 'text-green-400'
+    : abs < 50 ? 'text-yellow-400'
+    : 'text-red-400';
+
+  return (
+    <div className="space-y-1 p-2 bg-white/5 rounded">
+      <div className="flex justify-between text-xs text-gray-400">
+        <span className="flex items-center gap-2"><Timer size={12} /> Audio Drift</span>
+        <span className={`font-mono ${color}`}>
+          {drift === null ? '—' : `${drift > 0 ? '+' : ''}${drift.toFixed(0)} ms`}
+        </span>
+      </div>
+      <div className="text-[10px] text-gray-600">music − game clock</div>
+    </div>
+  );
+};
+
+const DebugMenu: React.FC<DebugMenuProps> = ({ config, onConfigChange, onRecalibrate, isOpen, setIsOpen, getAudioDrift }) => {
   const toggle = (key: keyof DebugConfig) => {
     onConfigChange({ ...config, [key]: !config[key] });
   };
@@ -120,9 +152,17 @@ const DebugMenu: React.FC<DebugMenuProps> = ({ config, onConfigChange, onRecalib
                 <span className="text-[10px] font-mono">{config.showBlockHitboxes ? 'ON' : 'OFF'}</span>
             </button>
 
+            {getAudioDrift && (
+              <>
+                <div className="h-px bg-gray-700 my-2"></div>
+                <h3 className="text-xs font-mono uppercase text-gray-500 tracking-widest mb-2">Audio Sync</h3>
+                <AudioDriftReadout getAudioDrift={getAudioDrift} />
+              </>
+            )}
+
             <div className="h-px bg-gray-700 my-2"></div>
 
-            <button 
+            <button
                 onClick={onRecalibrate}
                 className="flex items-center justify-center gap-2 w-full p-2 rounded text-sm bg-white/10 text-white hover:bg-white/20 transition-colors"
             >
