@@ -7,7 +7,7 @@ import {
   Settings, List, Edit3, GripVertical, Check
 } from 'lucide-react';
 import { Beatmap, BeatmapDifficulty, BeatData, BlockNote, SlashDirection, NoteGroup, SingleNote, BeatItem } from '../../types';
-import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS, isNoteGroup } from '../../constants';
+import { TRACK_LAYOUT, DIRECTION_ARROWS, getTrackType, GAME_CONFIG, BEATMAPS, isNoteGroup, notesToMeasures } from '../../constants';
 import { beatmapStorage, processBeatmap, RawBeatmap } from '../../services/beatmapStorage';
 import { createBlockMesh } from '../../utils/threeHelpers';
 
@@ -29,6 +29,15 @@ const DIFFICULTY_COLORS: Record<BeatmapDifficulty, string> = {
   expert: 'bg-red-500',
 };
 
+// Derive the editor's measure grid from a beatmap. Float-beat `notes` maps are
+// projected onto the grid; an empty/missing grid falls back to one empty measure
+// so the editor never operates on an empty `measures` array (which would crash).
+const deriveMeasures = (bm?: Beatmap): BeatData[][] => {
+  if (bm?.notes && bm.notes.length > 0) return notesToMeasures(bm.notes);
+  if (bm?.data && bm.data.length > 0) return bm.data;
+  return [[null, null, null, null]];
+};
+
 const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap }) => {
   // Check if editing a built-in beatmap
   const builtInIds = new Set(BEATMAPS.map(b => b.id));
@@ -45,6 +54,7 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
   const [difficulty, setDifficulty] = useState<BeatmapDifficulty>(initialBeatmap?.difficulty || 'normal');
   const [difficultyRating, setDifficultyRating] = useState(initialBeatmap?.difficultyRating || 5);
   const [youtubeId, setYoutubeId] = useState(initialBeatmap?.youtubeId || '');
+  const [audioUrl, setAudioUrl] = useState(initialBeatmap?.audioUrl || '');
   const [startDelay, setStartDelay] = useState(initialBeatmap?.startDelay || 2000);
   
   // For built-in beatmaps, always generate a new ID
@@ -58,9 +68,7 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
   });
   
   // Beatmap data state (measures -> beats)
-  const [measures, setMeasures] = useState<BeatData[][]>(
-    initialBeatmap?.data || [[null, null, null, null]]
-  );
+  const [measures, setMeasures] = useState<BeatData[][]>(() => deriveMeasures(initialBeatmap));
   
   // Editor state
   const [selectedMeasure, setSelectedMeasure] = useState(0);
@@ -891,10 +899,13 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
       difficulty,
       difficultyRating,
       youtubeId: youtubeId || undefined,
+      audioUrl: audioUrl || undefined,
       startDelay,
+      // The grid is authoritative after editing; omit `notes` so the runtime
+      // reads `data` (otherwise float-beat notes would shadow the edited grid).
       data: measures,
     };
-    
+
     await beatmapStorage.save(rawBeatmap);
     
     // Show success feedback
@@ -921,8 +932,9 @@ const BeatmapEditor: React.FC<BeatmapEditorProps> = ({ onBack, initialBeatmap })
       setDifficulty(raw.difficulty || 'normal');
       setDifficultyRating(raw.difficultyRating || 5);
       setYoutubeId(raw.youtubeId || '');
+      setAudioUrl(raw.audioUrl || '');
       setStartDelay(raw.startDelay || 2000);
-      setMeasures(raw.data || [[null, null, null, null]]);
+      setMeasures(deriveMeasures(raw as unknown as Beatmap));
       setSelectedMeasure(0);
       setSelectedBeat(0);
     } catch (err) {
