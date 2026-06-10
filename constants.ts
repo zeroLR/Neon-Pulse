@@ -325,22 +325,42 @@ const countNotes = (data: BeatData[][]): number => {
 const calculateDuration = (measures: number, bpm: number): string => {
   const beatsPerMeasure = 4;
   const totalBeats = measures * beatsPerMeasure;
-  const totalSeconds = (totalBeats / bpm) * 60;
+  return formatDuration((totalBeats / bpm) * 60);
+};
+
+// Format a number of seconds as "m:ss".
+const formatDuration = (totalSeconds: number): string => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.floor(totalSeconds % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
 // Process raw beatmap JSON into full Beatmap type
-const processBeatmap = (raw: any): Beatmap => ({
-  ...raw,
-  duration: calculateDuration(raw.data.length, raw.bpm),
-  noteCount: countNotes(raw.data),
-});
+const processBeatmap = (raw: any): Beatmap => {
+  // Float-beat format: derive metadata from the note list.
+  if (raw.notes && raw.notes.length > 0) {
+    const lastBeat = raw.notes.reduce((max: number, n: Note) => Math.max(max, n.beat), 0);
+    return {
+      ...raw,
+      data: raw.data ?? [],
+      duration: formatDuration(((lastBeat + 1) / raw.bpm) * 60),
+      noteCount: raw.notes.length,
+    };
+  }
+  return {
+    ...raw,
+    duration: calculateDuration(raw.data.length, raw.bpm),
+    noteCount: countNotes(raw.data),
+  };
+};
+
+// Import beatmaps from JSON files
+import syncTestBeatmap from './beatmaps/sync-test.json';
 
 // Beatmap Collection - loaded from JSON files
 export const BEATMAPS: Beatmap[] = [
   processBeatmap(fadedBeatmap),
+  processBeatmap(syncTestBeatmap),
 ];
 
 // Default beatmap (for backwards compatibility)

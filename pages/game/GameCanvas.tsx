@@ -282,19 +282,23 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     const beatInterval = 60000 / beatmap.bpm;
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
 
-    // Add blockTravelTime to spawn blocks early so they arrive at HIT_Z on the beat
+    // Add blockTravelTime to spawn blocks early so they arrive at HIT_Z on the beat.
+    // Use the EXACT (non-floored) current beat position to compute spawn depth:
+    // flooring would drop the sub-beat phase of gameTime, which then leaks into
+    // the arrival time as a drifting offset. Keep an integer index only for the
+    // lookahead spawn window gating.
     const effectiveGameTime = gameTime - startDelay + blockTravelTime;
-    const currentBeatIndex = Math.max(0, Math.floor(effectiveGameTime / beatInterval));
-    const targetSpawnBeat = currentBeatIndex + lookahead;
+    const currentBeatExact = Math.max(0, effectiveGameTime / beatInterval);
+    const targetSpawnBeat = Math.floor(currentBeatExact) + lookahead;
 
     // spawnedBeatIndex is a pointer into the beat-sorted note list.
     while (spawnedBeatIndex.current < timedNotes.length) {
       const tn = timedNotes[spawnedBeatIndex.current];
       if (tn.beat > targetSpawnBeat) break;
-      // beatsAhead (relative to the beat arriving now) drives the spawn depth,
-      // so the block reaches HIT_Z exactly on its beat. Fractional beats are
-      // honored directly - no sub-beat array spreading needed.
-      spawnSingleBlock(tn, gameTime, tn.beat - currentBeatIndex);
+      // beatsAhead (relative to the exact beat arriving now) drives the spawn
+      // depth, so the block reaches HIT_Z exactly at startDelay + beat*interval.
+      // Fractional beats are honored directly - no sub-beat array spreading.
+      spawnSingleBlock(tn, gameTime, tn.beat - currentBeatExact);
       spawnedBeatIndex.current++;
     }
 
@@ -612,7 +616,11 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   // Load the beatmap's audio file (if any) so the Web Audio master clock is ready.
   useEffect(() => {
     if (!beatmap.audioUrl) return;
-    audioClock.load(beatmap.audioUrl).catch((err) => {
+    // Resolve bare filenames against the app base (public/ assets live under it).
+    const url = /^https?:\/\//.test(beatmap.audioUrl)
+      ? beatmap.audioUrl
+      : import.meta.env.BASE_URL + beatmap.audioUrl.replace(/^\//, '');
+    audioClock.load(url).catch((err) => {
       console.error('Audio load failed:', err);
     });
   }, [beatmap.audioUrl, audioClock]);

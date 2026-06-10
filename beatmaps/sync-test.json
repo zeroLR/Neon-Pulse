@@ -1,0 +1,42 @@
+{
+  "id": "sync-test",
+  "title": "Sync Test (Click 120)",
+  "artist": "Metronome",
+  "bpm": 120,
+  "difficulty": "easy",
+  "difficultyRating": 1,
+  "audioUrl": "click-120bpm.wav",
+  "startDelay": 0,
+  "data": [],
+  "notes": [
+    { "beat": 8,  "track": "L2", "direction": "down" },
+    { "beat": 9,  "track": "R2", "direction": "down" },
+    { "beat": 10, "track": "L2", "direction": "down" },
+    { "beat": 11, "track": "R2", "direction": "down" },
+    { "beat": 12, "track": "L2", "direction": "down" },
+    { "beat": 13, "track": "R2", "direction": "down" },
+    { "beat": 14, "track": "L2", "direction": "down" },
+    { "beat": 15, "track": "R2", "direction": "down" },
+
+    { "beat": 16.0, "track": "L3", "direction": "right" },
+    { "beat": 16.5, "track": "R3", "direction": "left" },
+    { "beat": 17.0, "track": "L3", "direction": "right" },
+    { "beat": 17.5, "track": "R3", "direction": "left" },
+    { "beat": 18.0, "track": "L3", "direction": "right" },
+    { "beat": 18.5, "track": "R3", "direction": "left" },
+    { "beat": 19.0, "track": "L3", "direction": "right" },
+    { "beat": 19.5, "track": "R3", "direction": "left" },
+
+    { "beat": 20, "track": "L2", "direction": "down" },
+    { "beat": 20, "track": "R2", "direction": "down" },
+
+    { "beat": 22, "track": "T1", "direction": "down" },
+    { "beat": 24, "track": "B1", "direction": "up" },
+
+    { "beat": 26, "track": "L1", "direction": "up-left" },
+    { "beat": 26, "track": "R1", "direction": "up-right" },
+
+    { "beat": 28, "track": "L2", "direction": "down" },
+    { "beat": 28, "track": "R2", "direction": "down" }
+  ]
+}
