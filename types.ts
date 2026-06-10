@@ -18,6 +18,7 @@ export interface Beatmap {
   noteCount: number;
   data: BeatData[][];
   youtubeId?: string; // Optional YouTube video ID for music source
+  audioUrl?: string; // Optional local/remote audio file (mp3/ogg/etc). When set, drives the master clock via Web Audio.
   startDelay?: number; // Optional delay in ms before first beat (for YouTube sync)
 }
 

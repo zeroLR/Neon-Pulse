@@ -11,6 +11,7 @@ import {
   useCalibration,
   useThreeScene,
   useYouTubePlayer,
+  useAudioClock,
   usePoseTracking
 } from '../../hooks';
 import { Results } from '../../types';
@@ -102,6 +103,11 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
 
   // YouTube Player
   const youtube = useYouTubePlayer();
+
+  // Web Audio master clock - used when the beatmap ships a local/remote audio file.
+  // Drives game time from the audio hardware clock instead of accumulated frame deltas.
+  const audioClock = useAudioClock();
+  const useAudioMaster = !!beatmap.audioUrl;
 
   // Audio
   const audio = useAudio();
@@ -352,9 +358,16 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     const dt = Math.min(rawDt, 0.1);
     lastUpdateTime.current = time;
     
-    // Only accumulate game time when playing and not paused
+    // Advance game time when playing and not paused.
     if (gameStatus === 'playing' && !isPaused && isGameActive.current) {
-      accumulatedGameTime.current += dt * 1000; // Convert to ms
+      if (useAudioMaster && audioClock.isPlaying()) {
+        // Slave the game clock to the audio hardware clock: re-derive the song
+        // position each frame instead of accumulating deltas. Frame drops no
+        // longer cause drift - a late frame just reads the correct position.
+        accumulatedGameTime.current = audioClock.getTime() * 1000;
+      } else {
+        accumulatedGameTime.current += dt * 1000; // Convert to ms
+      }
     }
     
     lastTime.current = time;
@@ -540,7 +553,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     if (sceneRefs.current.rightSaber) {
       prevRightBladePoints.current = getSaberBladePoints(sceneRefs.current.rightSaber, debugConfig.saberScale);
     }
-  }, [gameStatus, isPaused, debugConfig, calibration, audio, blockSpeed, stats, isGameActive, onGameOver, setGameStatus, beatmap]);
+  }, [gameStatus, isPaused, debugConfig, calibration, audio, blockSpeed, stats, isGameActive, onGameOver, setGameStatus, beatmap, useAudioMaster, audioClock]);
 
   // Render loop
   const renderLoop = useCallback((time: number) => {
@@ -643,11 +656,44 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameStatus, isPaused]);
 
+  // Load the beatmap's audio file (if any) so the Web Audio master clock is ready.
+  useEffect(() => {
+    if (!beatmap.audioUrl) return;
+    audioClock.load(beatmap.audioUrl).catch((err) => {
+      console.error('Audio load failed:', err);
+    });
+  }, [beatmap.audioUrl, audioClock]);
+
+  // Keep the music track's volume in sync with the global mute toggle.
+  useEffect(() => {
+    audioClock.setVolume(audio.isMuted ? 0 : 1);
+  }, [audio.isMuted, audioClock]);
+
+  // Stop the music whenever we leave active play (game over, exit to menu, etc.).
+  useEffect(() => {
+    if (useAudioMaster && gameStatus !== 'playing') {
+      audioClock.stop();
+    }
+  }, [gameStatus, useAudioMaster, audioClock]);
+
+  // Web Audio sync - start the track (and thus the master clock) when countdown ends.
+  // Takes priority over YouTube: with a local file we get a drift-free hardware clock.
+  useEffect(() => {
+    if (countdown === null && isGameActive.current && !isPaused && useAudioMaster) {
+      // Reset spawn refs; the audio clock itself becomes the source of game time.
+      accumulatedGameTime.current = 0;
+      lastUpdateTime.current = performance.now();
+      spawnedBeatIndex.current = 0;
+      nextSpawnTime.current = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
+      audioClock.play(0);
+    }
+  }, [countdown, isPaused, useAudioMaster, beatmap.startDelay, audioClock, isGameActive]);
+
   // YouTube sync - start music when countdown ends
   // Music should start immediately when game becomes active, blocks will arrive at HIT_Z after startDelay
   // Also reset game time here to ensure consistent timing between first start and retry
   useEffect(() => {
-    if (countdown === null && isGameActive.current && !isPaused && beatmap.youtubeId) {
+    if (countdown === null && isGameActive.current && !isPaused && !useAudioMaster && beatmap.youtubeId) {
       console.log('YouTube sync: playing video, startDelay =', startDelay);
       // Reset ALL timing and spawn refs to ensure consistent start timing
       accumulatedGameTime.current = 0;
@@ -661,9 +707,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     }
   }, [countdown, isPaused, beatmap.youtubeId, beatmap.startDelay, youtube, isGameActive, startDelay]);
 
-  // Reset timing when countdown ends (for beatmaps without YouTube)
+  // Reset timing when countdown ends (for beatmaps with no music source)
   useEffect(() => {
-    if (countdown === null && isGameActive.current && !isPaused && !beatmap.youtubeId) {
+    if (countdown === null && isGameActive.current && !isPaused && !beatmap.youtubeId && !useAudioMaster) {
       // Reset ALL timing and spawn refs to ensure consistent start timing
       accumulatedGameTime.current = 0;
       lastUpdateTime.current = performance.now();
@@ -671,7 +717,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
       const currentStartDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
       nextSpawnTime.current = currentStartDelay;
     }
-  }, [countdown, isPaused, beatmap.youtubeId, beatmap.startDelay, isGameActive]);
+  }, [countdown, isPaused, beatmap.youtubeId, beatmap.startDelay, isGameActive, useAudioMaster]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -689,7 +735,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   // Handlers
   const handlePause = () => {
     setIsPaused(true);
-    youtube.pauseYouTube();
+    if (useAudioMaster) audioClock.pause();
+    else youtube.pauseYouTube();
   };
 
   const handleResume = () => {
@@ -701,28 +748,38 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
 
   const handleRetry = () => {
     setIsPaused(false);
-    youtube.restartYouTube();
+    if (useAudioMaster) audioClock.stop();
+    else youtube.restartYouTube();
     // On retry, camera is already active, so start countdown immediately
-    nextSpawnTime
     initGame(true, GAME_CONFIG.RETRY_DELAY);
   };
 
   // Live audio-vs-game-clock drift for the debug readout (ms).
-  // The music is seeked to 0 and the game clock reset to 0 at the same moment
-  // (countdown end), so they should track 1:1. A non-zero value is real drift.
-  // Positive = music ahead of game clock. Null when no sync source is available.
+  // The music and the game clock are both anchored to 0 at countdown end, so they
+  // should track 1:1. A non-zero value is real drift. Positive = music ahead.
+  // With the Web Audio master clock the game clock IS the audio clock, so this
+  // reads ~0 by construction (a confirmation that timing is locked).
+  // Null when no sync source is available.
   const getAudioDrift = useCallback((): number | null => {
-    if (!beatmap.youtubeId || !isGameActive.current || isPaused) return null;
+    if (!isGameActive.current || isPaused) return null;
+    const gameTimeSec = accumulatedGameTime.current / 1000;
+    if (useAudioMaster) {
+      if (!audioClock.isPlaying()) return null;
+      return (audioClock.getTime() - gameTimeSec) * 1000;
+    }
+    if (!beatmap.youtubeId) return null;
     const ytTime = youtube.getEstimatedTime();
     if (ytTime === null) return null;
-    const gameTimeSec = accumulatedGameTime.current / 1000;
     return (ytTime - gameTimeSec) * 1000;
-  }, [beatmap.youtubeId, isPaused, youtube, isGameActive]);
+  }, [beatmap.youtubeId, isPaused, youtube, isGameActive, useAudioMaster, audioClock]);
 
   const handleExit = () => {
     // Set flag to prevent camera restart during exit
     isExiting.current = true;
-    
+
+    // Stop the music immediately so it doesn't bleed past the navigation delay.
+    if (useAudioMaster) audioClock.stop();
+
     // Stop pose detection and camera before navigating away
     console.log('handleExit: stopping pose detection...');
     stopPose();
