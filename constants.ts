@@ -265,6 +265,48 @@ export const normalizeToNotes = (beatmap: Beatmap): TimedNote[] => {
 export const getTotalBeatSlots = (beatmap: Beatmap): number =>
   beatmap.data.reduce((sum, measure) => sum + measure.length, 0);
 
+// Convert a float-beat note list back into the legacy measure/beat grid so the
+// (measure-based) editor can display/edit it. On-beat notes become a single note
+// or NoteGroup; evenly-subdivided notes (1/2, 1/3, 1/4...) become an array. This
+// is a pragmatic inverse of normalizeToNotes: it round-trips cleanly tiled beats;
+// any beat whose offsets don't evenly tile from 0 is collapsed onto the beat
+// start (lossy but safe) - the grid editor can't represent arbitrary offsets yet.
+export const notesToMeasures = (notes: Note[]): BeatData[][] => {
+  if (!notes || notes.length === 0) return [[null, null, null, null]];
+  const maxBeat = notes.reduce((m, n) => Math.max(m, n.beat), 0);
+  const totalSlots = Math.max(4, Math.ceil((Math.floor(maxBeat) + 1) / 4) * 4);
+
+  const groups: Note[][] = Array.from({ length: totalSlots }, () => []);
+  for (const n of notes) {
+    const slot = Math.floor(n.beat + 1e-6);
+    if (slot >= 0 && slot < totalSlots) groups[slot].push(n);
+  }
+
+  const fracOf = (n: Note) => n.beat - Math.floor(n.beat + 1e-6);
+
+  const beats: BeatData[] = groups.map((group): BeatData => {
+    if (group.length === 0) return null;
+    if (group.every(n => fracOf(n) < 1e-3)) {
+      const bns = group.map(n => parseBeatNote(n));
+      return bns.length === 1 ? bns[0] : { notes: bns };
+    }
+    // Sub-beats: one array slot per distinct offset, only if they tile evenly.
+    const offsets = [...new Set(group.map(n => Math.round(fracOf(n) * 12) / 12))].sort((a, b) => a - b);
+    const tilesEvenly = offsets.every((off, i) => Math.abs(off - i / offsets.length) < 1 / 24);
+    if (!tilesEvenly) {
+      return { notes: group.map(n => parseBeatNote(n)) };
+    }
+    return offsets.map((off): BeatItem => {
+      const here = group.filter(n => Math.abs(fracOf(n) - off) < 1 / 24).map(n => parseBeatNote(n));
+      return here.length === 1 ? here[0] : { notes: here };
+    });
+  });
+
+  const measures: BeatData[][] = [];
+  for (let i = 0; i < beats.length; i += 4) measures.push(beats.slice(i, i + 4));
+  return measures;
+};
+
 // Direction arrow mapping for UI display
 export const DIRECTION_ARROWS: Record<SlashDirection, string> = {
   'up': '↑',

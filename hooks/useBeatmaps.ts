@@ -36,24 +36,26 @@ export const useBeatmaps = (): UseBeatmapsResult => {
   const [error, setError] = useState<string | null>(null);
   const initialized = useRef(false);
 
-  // Initialize built-in beatmaps into IndexedDB (only once)
+  // Sync built-in beatmaps into IndexedDB. Built-ins are authored in code, so we
+  // always overwrite the stored copy to keep it in step with the latest version
+  // (e.g. newly added notes/audioUrl fields). Edits to a built-in are saved under
+  // a separate `custom-*` id by the editor, so this never clobbers user work.
   const initBuiltInBeatmaps = useCallback(async () => {
     for (const beatmap of BEATMAPS) {
-      const exists = await beatmapStorage.exists(beatmap.id);
-      if (!exists) {
-        const rawBeatmap: RawBeatmap = {
-          id: beatmap.id,
-          title: beatmap.title,
-          artist: beatmap.artist,
-          bpm: beatmap.bpm,
-          difficulty: beatmap.difficulty,
-          difficultyRating: beatmap.difficultyRating,
-          youtubeId: beatmap.youtubeId,
-          startDelay: beatmap.startDelay,
-          data: beatmap.data,
-        };
-        await beatmapStorage.save(rawBeatmap);
-      }
+      const rawBeatmap: RawBeatmap = {
+        id: beatmap.id,
+        title: beatmap.title,
+        artist: beatmap.artist,
+        bpm: beatmap.bpm,
+        difficulty: beatmap.difficulty,
+        difficultyRating: beatmap.difficultyRating,
+        youtubeId: beatmap.youtubeId,
+        audioUrl: beatmap.audioUrl,
+        startDelay: beatmap.startDelay,
+        data: beatmap.data,
+        notes: beatmap.notes,
+      };
+      await beatmapStorage.save(rawBeatmap);
     }
   }, []);
 
@@ -102,8 +104,10 @@ export const useBeatmaps = (): UseBeatmapsResult => {
           difficulty: beatmap.difficulty,
           difficultyRating: beatmap.difficultyRating,
           youtubeId: beatmap.youtubeId,
+          audioUrl: beatmap.audioUrl,
           startDelay: beatmap.startDelay,
           data: beatmap.data,
+          notes: beatmap.notes,
         };
         
         // Delete the conflicting one and save with new ID

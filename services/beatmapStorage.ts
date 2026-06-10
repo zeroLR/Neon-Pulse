@@ -3,7 +3,7 @@
  * Uses IndexedDB to store custom beatmaps locally
  */
 
-import { Beatmap, BeatData } from '../types';
+import { Beatmap, BeatData, Note } from '../types';
 
 const DB_NAME = 'NeonPulse';
 const DB_VERSION = 1;
@@ -18,8 +18,10 @@ export interface RawBeatmap {
   difficulty: 'easy' | 'normal' | 'hard' | 'expert';
   difficultyRating: number;
   youtubeId?: string;
+  audioUrl?: string; // Optional local/remote audio file (drives Web Audio master clock)
   startDelay?: number; // Optional delay in ms before first beat
   data: BeatData[][];
+  notes?: Note[]; // Float-beat note list. When present, takes precedence over `data`.
 }
 
 // Helper to count notes in a beatmap
@@ -38,22 +40,37 @@ const countNotes = (data: BeatData[][]): number => {
   return count;
 };
 
-// Calculate duration based on BPM and measures
-const calculateDuration = (measures: number, bpm: number): string => {
-  const beatsPerMeasure = 4;
-  const totalBeats = measures * beatsPerMeasure;
-  const totalSeconds = (totalBeats / bpm) * 60;
+// Format seconds as "m:ss"
+const formatDuration = (totalSeconds: number): string => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.floor(totalSeconds % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
+// Calculate duration based on BPM and measures
+const calculateDuration = (measures: number, bpm: number): string => {
+  const beatsPerMeasure = 4;
+  return formatDuration(((measures * beatsPerMeasure) / bpm) * 60);
+};
+
 // Process raw beatmap JSON into full Beatmap type
-export const processBeatmap = (raw: RawBeatmap): Beatmap => ({
-  ...raw,
-  duration: calculateDuration(raw.data.length, raw.bpm),
-  noteCount: countNotes(raw.data),
-});
+export const processBeatmap = (raw: RawBeatmap): Beatmap => {
+  // Float-beat format: derive metadata from the note list.
+  if (raw.notes && raw.notes.length > 0) {
+    const lastBeat = raw.notes.reduce((max, n) => Math.max(max, n.beat), 0);
+    return {
+      ...raw,
+      data: raw.data ?? [],
+      duration: formatDuration(((lastBeat + 1) / raw.bpm) * 60),
+      noteCount: raw.notes.length,
+    };
+  }
+  return {
+    ...raw,
+    duration: calculateDuration(raw.data.length, raw.bpm),
+    noteCount: countNotes(raw.data),
+  };
+};
 
 class BeatmapStorageService {
   private db: IDBDatabase | null = null;
@@ -210,14 +227,16 @@ class BeatmapStorageService {
           const rawBeatmap: RawBeatmap = JSON.parse(content);
           
           // Validate required fields
-          if (!rawBeatmap.id || !rawBeatmap.title || !rawBeatmap.bpm || !rawBeatmap.data) {
+          if (!rawBeatmap.id || !rawBeatmap.title || !rawBeatmap.bpm) {
             throw new Error('Invalid beatmap format: missing required fields');
           }
-          
-          // Validate data structure
-          if (!Array.isArray(rawBeatmap.data)) {
-            throw new Error('Invalid beatmap format: data must be an array');
+
+          // Must carry either a float-beat note list or a legacy measure grid.
+          const hasNotes = Array.isArray(rawBeatmap.notes) && rawBeatmap.notes.length > 0;
+          if (!hasNotes && !Array.isArray(rawBeatmap.data)) {
+            throw new Error('Invalid beatmap format: must have notes or data');
           }
+          if (!rawBeatmap.data) rawBeatmap.data = [];
           
           // Save to IndexedDB
           await this.save(rawBeatmap);
@@ -250,10 +269,12 @@ class BeatmapStorageService {
       difficulty: beatmap.difficulty,
       difficultyRating: beatmap.difficultyRating,
       youtubeId: beatmap.youtubeId,
+      audioUrl: beatmap.audioUrl,
       startDelay: beatmap.startDelay,
       data: beatmap.data,
+      notes: beatmap.notes,
     };
-    
+
     const json = JSON.stringify(rawBeatmap, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
