@@ -1,5 +1,5 @@
 
-import { BlockNote, BlockType, SlashDirection, BeatData, Beatmap, NoteGroup, SingleNote, BeatItem } from './types';
+import { BlockNote, BlockType, SlashDirection, BeatData, Beatmap, NoteGroup, SingleNote, BeatItem, Note } from './types';
 
 export const GAME_CONFIG = {
   ASPECT_RATIO: 16 / 9,
@@ -218,6 +218,53 @@ export const getNotesFromBeatItem = (item: BeatItem): BlockNote[] => {
   return [parseBeatNote(item as SingleNote)];
 };
 
+// A note resolved to an absolute beat with color/direction filled in.
+// This is the single internal representation the runtime spawns from.
+export interface TimedNote extends BlockNote {
+  beat: number; // Absolute beat from start (float)
+}
+
+// Normalize either beatmap format into a flat, beat-sorted list of notes.
+// - New float-beat format (`notes`) takes precedence.
+// - Legacy measure/beat `data` is flattened: each slot is one beat, arrays are
+//   spread evenly across sub-beats (1/n), and note groups land on the same beat.
+// This reproduces the exact timing the legacy spawn logic produced.
+export const normalizeToNotes = (beatmap: Beatmap): TimedNote[] => {
+  if (beatmap.notes && beatmap.notes.length > 0) {
+    return beatmap.notes
+      .map((n: Note): TimedNote => ({ ...parseBeatNote(n), beat: n.beat }))
+      .sort((a, b) => a.beat - b.beat);
+  }
+
+  const out: TimedNote[] = [];
+  let globalBeat = 0;
+  for (const measure of beatmap.data) {
+    for (const beatData of measure) {
+      if (beatData !== null) {
+        if (Array.isArray(beatData)) {
+          const subBeatOffset = 1 / beatData.length;
+          beatData.forEach((item, i) => {
+            for (const note of getNotesFromBeatItem(item as BeatItem)) {
+              out.push({ ...note, beat: globalBeat + i * subBeatOffset });
+            }
+          });
+        } else {
+          for (const note of getNotesFromBeatItem(beatData as BeatItem)) {
+            out.push({ ...note, beat: globalBeat });
+          }
+        }
+      }
+      globalBeat++;
+    }
+  }
+  out.sort((a, b) => a.beat - b.beat);
+  return out;
+};
+
+// Total number of beat slots in a beatmap (legacy measure/beat length sum).
+export const getTotalBeatSlots = (beatmap: Beatmap): number =>
+  beatmap.data.reduce((sum, measure) => sum + measure.length, 0);
+
 // Direction arrow mapping for UI display
 export const DIRECTION_ARROWS: Record<SlashDirection, string> = {
   'up': '↑',
@@ -278,22 +325,42 @@ const countNotes = (data: BeatData[][]): number => {
 const calculateDuration = (measures: number, bpm: number): string => {
   const beatsPerMeasure = 4;
   const totalBeats = measures * beatsPerMeasure;
-  const totalSeconds = (totalBeats / bpm) * 60;
+  return formatDuration((totalBeats / bpm) * 60);
+};
+
+// Format a number of seconds as "m:ss".
+const formatDuration = (totalSeconds: number): string => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.floor(totalSeconds % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
 // Process raw beatmap JSON into full Beatmap type
-const processBeatmap = (raw: any): Beatmap => ({
-  ...raw,
-  duration: calculateDuration(raw.data.length, raw.bpm),
-  noteCount: countNotes(raw.data),
-});
+const processBeatmap = (raw: any): Beatmap => {
+  // Float-beat format: derive metadata from the note list.
+  if (raw.notes && raw.notes.length > 0) {
+    const lastBeat = raw.notes.reduce((max: number, n: Note) => Math.max(max, n.beat), 0);
+    return {
+      ...raw,
+      data: raw.data ?? [],
+      duration: formatDuration(((lastBeat + 1) / raw.bpm) * 60),
+      noteCount: raw.notes.length,
+    };
+  }
+  return {
+    ...raw,
+    duration: calculateDuration(raw.data.length, raw.bpm),
+    noteCount: countNotes(raw.data),
+  };
+};
+
+// Import beatmaps from JSON files
+import syncTestBeatmap from './beatmaps/sync-test.json';
 
 // Beatmap Collection - loaded from JSON files
 export const BEATMAPS: Beatmap[] = [
   processBeatmap(fadedBeatmap),
+  processBeatmap(syncTestBeatmap),
 ];
 
 // Default beatmap (for backwards compatibility)
