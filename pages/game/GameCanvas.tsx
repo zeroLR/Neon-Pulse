@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
-import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, parseBeatNote, isNoteGroup, getNotesFromBeatItem } from '../../constants';
-import { BlockNote, BeatData, Beatmap, BeatItem } from '../../types';
+import { GAME_CONFIG, TRACK_LAYOUT, getTrackIndexByLabel, normalizeToNotes } from '../../constants';
+import { BlockNote, Beatmap } from '../../types';
 
 // Hooks
 import { 
@@ -146,6 +146,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   // Start delay: use beatmap's startDelay or default
   const startDelay = beatmap.startDelay ?? GAME_CONFIG.INITIAL_SPAWN_DELAY;
 
+  // Flattened, beat-sorted notes - the single representation the spawner reads.
+  // Works for both the float-beat `notes` format and the legacy measure/beat `data`.
+  const timedNotes = useMemo(() => normalizeToNotes(beatmap), [beatmap]);
+
   // Game state refs
   const blocks = useRef<any[]>([]);
   const lastTime = useRef<number>(0);
@@ -231,22 +235,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
   }, [beatmap.startDelay, gameState, setIsPaused, currentMeasure, currentBeat, clearBlockMeshes, clearEffects, startCountdown]);
 
   // Spawn block helpers
-  const getBeatDataAtIndex = (globalBeatIndex: number): BeatData | null => {
-    let beatIdx = globalBeatIndex;
-    for (let m = 0; m < beatmap.data.length; m++) {
-      const measure = beatmap.data[m];
-      if (beatIdx < measure.length) {
-        return measure[beatIdx];
-      }
-      beatIdx -= measure.length;
-    }
-    return null;
-  };
-
-  const getTotalBeats = (): number => {
-    return beatmap.data.reduce((sum, measure) => sum + measure.length, 0);
-  };
-
   const spawnSingleBlock = (note: BlockNote, time: number, beatsAhead: number = 0) => {
     const trackIndex = getTrackIndexByLabel(note.track);
     const target = TRACK_LAYOUT[trackIndex];
@@ -291,64 +279,29 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     if (gameTime < nextSpawnTime.current) return;
     if (beatmapCompleted.current) return;
 
-    
     const beatInterval = 60000 / beatmap.bpm;
     const lookahead = GAME_CONFIG.SPAWN.LOOKAHEAD_BEATS;
-    const totalBeats = getTotalBeats();
-    
+
     // Add blockTravelTime to spawn blocks early so they arrive at HIT_Z on the beat
     const effectiveGameTime = gameTime - startDelay + blockTravelTime;
     const currentBeatIndex = Math.max(0, Math.floor(effectiveGameTime / beatInterval));
-    const targetSpawnIndex = Math.min(currentBeatIndex + lookahead, totalBeats - 1);
-    
-    // Helper to spawn all notes from a BeatItem at given timing
-    const spawnBeatItem = (item: BeatItem, timing: number) => {
-      const notes = getNotesFromBeatItem(item);
-      for (const note of notes) {
-        spawnSingleBlock(note, gameTime, timing);
-      }
-    };
-    
-    while (spawnedBeatIndex.current <= targetSpawnIndex) {
-      const beatIndex = spawnedBeatIndex.current;
-      const beatData = getBeatDataAtIndex(beatIndex);
-      
-      if (beatData === null) {
-        if (beatIndex >= totalBeats) {
-          beatmapCompleted.current = true;
-          break;
-        }
-        spawnedBeatIndex.current++;
-        continue;
-      }
-      
-      const beatsAhead = beatIndex - currentBeatIndex;
-      
-      if (Array.isArray(beatData)) {
-        // Array of items: spread across sub-beats (2 items = 1/2, 3 items = 1/3, etc.)
-        const subBeatOffset = 1 / beatData.length;
-        for (let i = 0; i < beatData.length; i++) {
-          spawnBeatItem(beatData[i] as BeatItem, beatsAhead + (i * subBeatOffset));
-        }
-      } else if (isNoteGroup(beatData)) {
-        // NoteGroup: all notes appear simultaneously
-        const notes = beatData.notes.map(n => parseBeatNote(n));
-        for (const note of notes) {
-          spawnSingleBlock(note, gameTime, beatsAhead);
-        }
-      } else {
-        // Single note (string or BlockNote)
-        const note = parseBeatNote(beatData);
-        spawnSingleBlock(note, gameTime, beatsAhead);
-      }
-      
+    const targetSpawnBeat = currentBeatIndex + lookahead;
+
+    // spawnedBeatIndex is a pointer into the beat-sorted note list.
+    while (spawnedBeatIndex.current < timedNotes.length) {
+      const tn = timedNotes[spawnedBeatIndex.current];
+      if (tn.beat > targetSpawnBeat) break;
+      // beatsAhead (relative to the beat arriving now) drives the spawn depth,
+      // so the block reaches HIT_Z exactly on its beat. Fractional beats are
+      // honored directly - no sub-beat array spreading needed.
+      spawnSingleBlock(tn, gameTime, tn.beat - currentBeatIndex);
       spawnedBeatIndex.current++;
     }
-    
-    if (spawnedBeatIndex.current >= totalBeats) {
+
+    if (spawnedBeatIndex.current >= timedNotes.length) {
       beatmapCompleted.current = true;
     }
-    
+
     nextSpawnTime.current = gameTime + beatInterval;
   };
 

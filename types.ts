@@ -17,6 +17,7 @@ export interface Beatmap {
   duration: string; // e.g., "2:30"
   noteCount: number;
   data: BeatData[][];
+  notes?: Note[]; // Float-beat note list. When present, takes precedence over `data`.
   youtubeId?: string; // Optional YouTube video ID for music source
   audioUrl?: string; // Optional local/remote audio file (mp3/ogg/etc). When set, drives the master clock via Web Audio.
   startDelay?: number; // Optional delay in ms before first beat (for YouTube sync)
@@ -51,6 +52,17 @@ export type SingleNote = string | BlockNote;
 
 // Helper type for items within a beat (can be single note, note group, or legacy array)
 export type BeatItem = SingleNote | NoteGroup;
+
+// Float-beat authoring format: a single note placed at an absolute beat from the
+// start of the track. This is the format BeatSaver/Beat Saber use (`_time`/`b`),
+// and is strictly more expressive than the legacy measure/beat array - arbitrary
+// sub-divisions need no nesting. The runtime normalizes both formats to this.
+export interface Note {
+  beat: number;               // Absolute beat from start (float, e.g. 12.5)
+  track: string;              // Track label (L1-L4, R1-R4, T1-T2, B1-B2)
+  direction?: SlashDirection; // Required slash direction (default: 'any')
+  color?: BlockType;          // Override color (default: derived from track)
+}
 
 // Beatmap beat data types
 // Structure:
