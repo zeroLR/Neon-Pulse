@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 
 /**
  * Web Audio playback layer that doubles as the game's master clock.
@@ -88,7 +88,11 @@ export const useAudioClock = (): UseAudioClockReturn => {
   const getTime = useCallback((): number => {
     const ctx = ctxRef.current;
     if (!ctx || !playingRef.current) return pausedAt.current;
-    const t = ctx.currentTime - startCtxTime.current;
+    // Subtract output latency so the reported position matches what the player
+    // actually HEARS (the scheduling clock runs ahead of the speakers). This
+    // keeps visual blocks aligned to the audible beat, not the buffered one.
+    const latency = (ctx as any).outputLatency || ctx.baseLatency || 0;
+    const t = (ctx.currentTime - latency) - startCtxTime.current;
     const dur = bufferRef.current?.duration ?? Infinity;
     return Math.min(Math.max(0, t), dur);
   }, []);
@@ -140,7 +144,13 @@ export const useAudioClock = (): UseAudioClockReturn => {
     }
   }, [play]);
 
-  const isPlaying = useCallback(() => playingRef.current, []);
+  // Only "playing" once the context is actually running - while it's still
+  // suspended (awaiting resume) currentTime is frozen, so callers must wait
+  // before treating getTime() as a live clock.
+  const isPlaying = useCallback(
+    () => playingRef.current && ctxRef.current?.state === 'running',
+    []
+  );
 
   const setVolume = useCallback((v: number) => {
     volumeRef.current = v;
@@ -158,5 +168,10 @@ export const useAudioClock = (): UseAudioClockReturn => {
     };
   }, [stopSource]);
 
-  return { load, play, pause, stop, seek, getTime, isPlaying, setVolume, isLoaded, duration };
+  // Stable object reference so effects that depend on the clock don't re-run
+  // every render (which would restart playback and reset the game clock).
+  return useMemo(
+    () => ({ load, play, pause, stop, seek, getTime, isPlaying, setVolume, isLoaded, duration }),
+    [load, play, pause, stop, seek, getTime, isPlaying, setVolume, isLoaded, duration]
+  );
 };

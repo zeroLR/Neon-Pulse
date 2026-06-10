@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo } from 'react';
 
 export interface UseYouTubePlayerReturn {
   youtubePlayerRef: React.RefObject<HTMLIFrameElement>;
@@ -97,12 +97,9 @@ export const useYouTubePlayer = (): UseYouTubePlayerReturn => {
     }
   }, []);
 
-  return {
-    youtubePlayerRef,
-    pauseYouTube,
-    playYouTube,
-    restartYouTube,
-    seekTo,
-    getEstimatedTime,
-  };
+  // Stable reference so the countdown/sync effects don't re-fire every render.
+  return useMemo(
+    () => ({ youtubePlayerRef, pauseYouTube, playYouTube, restartYouTube, seekTo, getEstimatedTime }),
+    [pauseYouTube, playYouTube, restartYouTube, seekTo, getEstimatedTime]
+  );
 };

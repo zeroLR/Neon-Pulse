@@ -315,9 +315,15 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
     const dt = Math.min(rawDt, 0.1);
     lastUpdateTime.current = time;
     
+    // For audio-master beatmaps, gameplay is driven entirely by the audio clock.
+    // Until the music is genuinely running (buffer loaded + context resumed) we
+    // hold everything frozen, otherwise the dt fallback would advance the clock
+    // and move blocks before the music starts, then snap backwards on play.
+    const audioReady = !useAudioMaster || audioClock.isPlaying();
+
     // Advance game time when playing and not paused.
-    if (gameStatus === 'playing' && !isPaused && isGameActive.current) {
-      if (useAudioMaster && audioClock.isPlaying()) {
+    if (gameStatus === 'playing' && !isPaused && isGameActive.current && audioReady) {
+      if (useAudioMaster) {
         // Slave the game clock to the audio hardware clock: re-derive the song
         // position each frame instead of accumulating deltas. Frame drops no
         // longer cause drift - a late frame just reads the correct position.
@@ -326,7 +332,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
         accumulatedGameTime.current += dt * 1000; // Convert to ms
       }
     }
-    
+
     lastTime.current = time;
 
     let currentLeftPos = new THREE.Vector3();
@@ -368,8 +374,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({
       }
     }
 
-    // Gameplay
-    if (gameStatus === 'playing' && !isPaused && isGameActive.current ) {
+    // Gameplay (held until the audio clock is live for audio-master beatmaps)
+    if (gameStatus === 'playing' && !isPaused && isGameActive.current && audioReady) {
       spawnBlock();
       
       if (beatmapCompleted.current) {
